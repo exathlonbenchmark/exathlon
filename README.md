@@ -9,6 +9,8 @@ Exathlon is a benchmark for explainable anomaly detection over high-dimensional 
 
 This repository contains the labeled dataset and source code for comparing various AD and ED methods under our evaluation framework.
 
+[Description and documentation](https://github.com/exathlonbenchmark/exathlon/wiki). 
+
 ## Project Configuration
 
 The data traces and ground truth table were uploaded as zip files under the `data/raw` directory. To extract them on Linux, macOS, or using Git Bash on Windows, execute the `extract_data` script from the project root folder:
@@ -18,6 +20,8 @@ The data traces and ground truth table were uploaded as zip files under the `dat
 ```
 
 This will extract all data files inside `data/raw`, preserving its directory structure. The content of `data/raw` can then either be left there or moved to any other location. In all cases, the full path to the extracted raw data must be provided to `DATA_ROOT` entry of the `.env` file described below.
+
+Please refer to the [dataset documentation](https://github.com/exathlonbenchmark/exathlon/wiki/Dataset) for additional details regarding the dataset's content and format.
 
 Using `conda`, from the project root folder, execute the following commands: 
 
