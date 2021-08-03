@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# DotEnv configuration
+.env
+
+# Pycharm, VS Code, Spyder, vim
+.idea
+.vscode/
+.spyproject/
+*.swp
+*.swo
+
+# Jupyter NB Checkpoints
+.ipynb_checkpoints/
+
+# Mac OS-specific storage files
+.DS_Store
+
+# Uncomment to exclude data/ and models/ folders
+#/data/
+#/models/

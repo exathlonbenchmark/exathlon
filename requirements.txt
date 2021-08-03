@@ -1,0 +1,8 @@
+numpy
+scipy
+pandas
+scikit-learn
+matplotlib
+tensorflow>=2.3.0
+tqdm
+python-dotenv
