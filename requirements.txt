@@ -1,8 +1,9 @@
-numpy
+python-dotenv
+numpy==1.19.5
 scipy
 pandas
 scikit-learn
+tensorflow==2.3.0
+keras-tuner # optional (automatic hyperparameter tuning)
 matplotlib
-tensorflow>=2.3.0
 tqdm
-python-dotenv
