@@ -1,8 +1,6 @@
 Exathlon
 ==============================
 
-> :information_source: *The source code and documentation for our provided pipeline is currently being reorganized and will be uploaded shortly. We are really sorry for the inconvenience.*
-
 Access to high-quality data repositories and benchmarks have been instrumental in advancing the state of the art in many experimental research domains. 
 
 Exathlon is a benchmark for explainable anomaly detection over high-dimensional time series data, constructed based on real data traces from repeated executions of large-scale stream processing jobs on an Apache Spark cluster. For some of these executions, we introduced instances of six different types of anomalous events, for which we provide ground truth labels to evaluate a wide range of anomaly detection (AD) and explanation discovery (ED) methods.
@@ -54,3 +52,13 @@ Some results and logging paths might exceed the Windows historical path length l
 >After changing the above option, no further configuration is required.
 >
 >Changed in version 3.6: Support for long paths was enabled in Python. 
+
+## Data License
+
+The provided dataset is licensed under a [CC BY-NC-SA 4.0 license](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+
+## Publications
+
+If you are using this benchmark as part of your research or work, please cite the following paper:
+
+[Exathlon: A Benchmark for Explainable Anomaly Detection over Time Series](http://vldb.org/pvldb/vol14/p2613-tatbul.pdf). Vincent Jacob, Fei Song, Arnaud Stiegler, Bijan Rad, Yanlei Diao, and Nesime Tatbul. Proceedings of the VLDB Endowment (PVLDB), 14(11): 2613 - 2626, 2021.
