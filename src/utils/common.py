@@ -4,6 +4,7 @@ import os
 import argparse
 import importlib
 
+import pandas as pd
 from dotenv import load_dotenv, find_dotenv
 
 # add absolute src directory to python path to import other project modules
@@ -17,8 +18,11 @@ PIPELINE_STEPS = [
     'build_features',
     'train_model',
     'train_scorer',
-    'train_detector'
+    'train_detector',
+    'train_explainer'
 ]
+# callable file names
+CALLABLES = PIPELINE_STEPS + ['run_pipeline']
 # main pipeline and normality modeling dataset names
 PIPELINE_TRAIN_NAME, PIPELINE_TEST_NAME = 'train', 'test'
 MODELING_TRAIN_NAME, MODELING_VAL_NAME, MODELING_TEST_NAME = 'train', 'val', 'test'
@@ -71,6 +75,8 @@ def get_output_path(args, pipeline_step, output_details=None):
         path_extensions['train_scorer'] = get_args_string(args, 'scoring')
     if step_index >= 4:
         path_extensions['train_detector'] = get_args_string(args, 'thresholding')
+    if step_index >= 5:
+        path_extensions['train_explainer'] = get_args_string(args, 'explanation')
     if pipeline_step == 'make_datasets':
         return os.path.join(
             INTERIM_ROOT,
@@ -83,7 +89,20 @@ def get_output_path(args, pipeline_step, output_details=None):
             path_extensions['make_datasets'],
             path_extensions['build_features']
         )
-    extensions_chain = [path_extensions[PIPELINE_STEPS[i]] for i in range(step_index + 1)]
+    # explanation discovery run on ground-truth labels
+    if pipeline_step == 'train_explainer' and args.explained_predictions == 'ground.truth':
+        # no AD model involved at all: the chain is then just data => features => explanation
+        if args.explanation_method in model_free_explanation_choices:
+            chain_ids = [PIPELINE_STEPS.index('make_datasets'), PIPELINE_STEPS.index('build_features'), step_index]
+        # a scorer is explained: the chain is then data => features => scoring => explanation
+        else:
+            chain_ids = list(range(PIPELINE_STEPS.index('train_scorer') + 1)) + [step_index]
+        # add an "ed" prefix to visually separate from anomaly detection paths
+        extensions_chain = [path_extensions[PIPELINE_STEPS[i]] for i in chain_ids]
+        extensions_chain[-1] = hyper_to_path('ed', extensions_chain[-1])
+    # either no explanation discovery involved, or involved at the very end on final AD predictions
+    else:
+        extensions_chain = [path_extensions[PIPELINE_STEPS[i]] for i in range(step_index + 1)]
     # return either the current step model's path (default) or the step comparison path
     comparison_path = os.path.join(
         MODELS_ROOT,
@@ -302,22 +321,47 @@ def get_scoring_args(args):
     return scoring_args
 
 
-def get_evaluation_args(args):
-    """Returns the relevant and ordered list of evaluation argument values from `args`.
+def get_ad_evaluation_args(args):
+    """Returns the relevant and ordered list of AD evaluation argument values from `args`.
 
     Args:
         args (argparse.Namespace): parsed command-line arguments.
 
     Returns:
-        list: relevant list of evaluation argument values corresponding to `args`.
+        list: relevant list of AD evaluation argument values corresponding to `args`.
     """
-    evaluation_args = [args.evaluation_type]
+    ad_evaluation_args = [args.evaluation_type]
     if args.evaluation_type == 'range':
-        evaluation_args += [
+        ad_evaluation_args += [
             args.recall_alpha, args.recall_omega, args.recall_delta, args.recall_gamma,
             args.precision_omega, args.precision_delta, args.precision_gamma
         ]
-    return evaluation_args + [args.f_score_beta]
+    return ad_evaluation_args + [args.f_score_beta]
+
+
+def get_ed_evaluation_args(args):
+    """Returns the relevant and ordered list of ED evaluation argument values from `args`.
+
+    Args:
+        args (argparse.Namespace): parsed command-line arguments.
+
+    Returns:
+        list: relevant list of ED evaluation argument values corresponding to `args`.
+    """
+    ed_evaluation_args = [args.ed_eval_min_anomaly_length, args.ed1_consistency_n_disturbances]
+    # min normal length, subsampling and accuracy-related arguments are only relevant for model-free methods
+    if args.explanation_method in model_free_explanation_choices:
+        ed_evaluation_args += [
+            args.mf_eval_min_normal_length,
+            args.mf_ed1_consistency_sampled_prop,
+            args.mf_ed1_accuracy_n_splits, args.mf_ed1_accuracy_test_prop
+        ]
+    # anomaly coverage is only relevant for model-dependent methods
+    elif args.explanation_method in model_dependent_explanation_choices:
+        ed_evaluation_args += [
+            args.md_eval_small_anomalies_expansion, args.md_eval_large_anomalies_coverage
+        ]
+    return ed_evaluation_args
 
 
 def get_thresholding_args(args):
@@ -335,6 +379,75 @@ def get_thresholding_args(args):
     return thresholding_args
 
 
+def get_best_thresholding_args(args):
+    """Returns the provided `args` with the "best" thresholding parameters in terms
+        of global F1-score on the test dataset.
+
+    Args:
+        args (argparse.Namespace): parsed command-line arguments.
+
+    Returns:
+        argparse.Namespace: updated args with best thresholding parameters.
+    """
+    thresholding_comparison_path = get_output_path(args, 'train_detector', 'comparison')
+    full_thresholding_comparison_path = os.path.join(
+        thresholding_comparison_path,
+        f'{get_args_string(args, "ad_evaluation")}_detection_comparison.csv'
+    )
+    thresholding_comparison_df = pd.read_csv(full_thresholding_comparison_path, index_col=[0, 1]).astype(float)
+    # for spark data, the "best" threshold is defined as maximizing the average F1-score across applications
+    aggregation_str = 'app_avg' if args.data == 'spark' else 'global'
+    best_thresholding_row = thresholding_comparison_df.loc[
+        thresholding_comparison_df.index.get_level_values('granularity') == aggregation_str
+    ].sort_values('TEST_GLOBAL_F1.0_SCORE', ascending=False).iloc[0]
+    return get_new_thresholding_args_from_str(args, best_thresholding_row.name[0])
+
+
+def get_new_thresholding_args_from_str(args, thresholding_str):
+    """Returns the provided `args` with updated thresholding parameters from `thresholding_str`.
+
+    `thresholding_str` must be consistent with the output of `get_args_string(args, "thresholding")`
+    for a single combination of thresholding arguments.
+
+    Args:
+        args (argparse.Namespace): parsed command-line arguments.
+        thresholding_str (str): thresholding parameters string of the form
+            `{thresholding_method}_{thresholding_factor}_{n_iterations}_{removal_factor}`.
+
+    Returns:
+        argparse.Namespace: updated args with thresholding parameters from `thresholding_str`.
+    """
+    thresholding_args = thresholding_str.split('_')
+    args_dict = vars(args)
+    args_dict['thresholding_method'] = thresholding_args[0]
+    args_dict['thresholding_factor'] = float(thresholding_args[1])
+    args_dict['n_iterations'] = int(thresholding_args[2])
+    args_dict['removal_factor'] = float(thresholding_args[3])
+    return argparse.Namespace(**args_dict)
+
+
+def get_explanation_args(args):
+    """Returns the relevant and ordered list of explanation discovery argument values from `args`.
+
+    Args:
+        args (argparse.Namespace): parsed command-line arguments.
+
+    Returns:
+        list: relevant list of explanation discovery argument values corresponding to `args`.
+    """
+    explanation_args = [args.explanation_method]
+    if args.explanation_method in model_free_explanation_choices:
+        if args.explanation_method == 'exstream':
+            explanation_args += [args.exstream_fp_scaled_std_threshold]
+        if args.explanation_method == 'macrobase':
+            explanation_args += [
+                args.macrobase_n_bins, args.macrobase_min_support, args.macrobase_min_risk_ratio
+            ]
+    if args.explanation_method == 'lime':
+        explanation_args += [args.lime_n_features]
+    return explanation_args
+
+
 # argument getter functions dictionary
 ARGS_GETTER_DICT = {
     'data': get_data_args,
@@ -342,8 +455,10 @@ ARGS_GETTER_DICT = {
     'modeling_task': get_modeling_task_args,
     'model': get_model_args,
     'scoring': get_scoring_args,
-    'evaluation': get_evaluation_args,
-    'thresholding': get_thresholding_args
+    'ad_evaluation': get_ad_evaluation_args,
+    'ed_evaluation': get_ed_evaluation_args,
+    'thresholding': get_thresholding_args,
+    'explanation': get_explanation_args
 }
 
 
@@ -500,6 +615,20 @@ gamma_choices = ['dup', 'no.dup', 'inv.poly']
 # TRAIN_DETECTOR
 # methods for selecting the outlier score threshold
 two_stat_ts_sel_choices = ['std', 'mad', 'iqr']
+
+# TRAIN_EXPLAINER
+# explanation discovery methods (relying on a model or not)
+model_free_explanation_choices = ['exstream', 'macrobase']
+model_dependent_explanation_choices = ['lime']
+explanation_choices = model_free_explanation_choices + model_dependent_explanation_choices
+# whether to "explain" ground-truth labels or predictions from an AD method
+explained_predictions_choices = ['ground.truth', 'model']
+# model-dependent evaluation (expansion and coverage policies of small and large anomalies, respectively)
+md_eval_small_anomalies_expansion_choices = ['none', 'before', 'after', 'both']
+md_eval_large_anomalies_coverage_choices = ['all', 'center', 'end']
+
+# RUN_PIPELINE
+pipeline_type_choices = ['ad', 'ed', 'ad.ed']
 
 # arguments for `make_datasets.py`
 parsers['make_datasets'] = argparse.ArgumentParser(
@@ -847,21 +976,97 @@ parsers['train_detector'].add_argument(
     '--removal-factor', default=DEFAULTS['removal_factor'], nargs='+', type=float,
     help='scores above `removal_factor * ts@{iteration_i}` will be removed for iteration i+1 (list to try)'
 )
-# additional arguments for `run_pipeline.py`
-parsers['run_pipeline'] = argparse.ArgumentParser(
-    parents=[parsers['train_detector']], description='Run a complete anomaly detection pipeline',
-    add_help=False
+
+# additional arguments for `train_explainer.py`
+parsers['train_explainer'] = argparse.ArgumentParser(
+    parents=[parsers['train_detector']],
+    description='Train an explanation discovery model to explain anomalies', add_help=False
+)
+parsers['train_explainer'].add_argument(
+    '--explanation-method', default=DEFAULTS['explanation_method'], choices=explanation_choices,
+    help='explanation discovery method'
+)
+parsers['train_explainer'].add_argument(
+    '--explained-predictions', default=DEFAULTS['explained_predictions'], choices=explained_predictions_choices,
+    help='positive predictions to explain (either ground-truth or outputs of an AD model)'
+)
+# common evaluation parameters
+parsers['train_explainer'].add_argument(
+    '--ed-eval-min-anomaly-length', default=DEFAULTS['ed_eval_min_anomaly_length'], type=int,
+    help='minimum anomaly length for an instance to be considered in ED evaluation'
+)
+parsers['train_explainer'].add_argument(
+    '--ed1-consistency-n-disturbances', default=DEFAULTS['ed1_consistency_n_disturbances'], type=int,
+    help='number of disturbances performed when computing ED1 consistency'
+)
+# model-free evaluation parameters
+parsers['train_explainer'].add_argument(
+    '--mf-eval-min-normal-length', default=DEFAULTS['mf_eval_min_normal_length'], type=int,
+    help='minimum normal data length for an instance to be considered in model-free evaluation'
+)
+parsers['train_explainer'].add_argument(
+    '--mf-ed1-consistency-sampled-prop', default=DEFAULTS['mf_ed1_consistency_sampled_prop'], type=is_percentage,
+    help='proportion of records sampled when computing ED1 consistency for model-free methods'
+)
+parsers['train_explainer'].add_argument(
+    '--mf-ed1-accuracy-n-splits', default=DEFAULTS['mf_ed1_accuracy_n_splits'], type=int,
+    help='number of random splits performed when computing ED1 accuracy for model-free methods'
+)
+parsers['train_explainer'].add_argument(
+    '--mf-ed1-accuracy-test-prop', default=DEFAULTS['mf_ed1_accuracy_test_prop'], type=is_percentage,
+    help='proportion of records used as test data when computing ED1 accuracy for model-free methods'
+)
+# model-dependent evaluation parameters
+parsers['train_explainer'].add_argument(
+    '--md-eval-small-anomalies-expansion', default=DEFAULTS['md_eval_small_anomalies_expansion'],
+    choices=md_eval_small_anomalies_expansion_choices,
+    help='expansion policy of small anomalies when evaluating model-dependent ED methods'
+)
+parsers['train_explainer'].add_argument(
+    '--md-eval-large-anomalies-coverage', default=DEFAULTS['md_eval_large_anomalies_coverage'],
+    choices=md_eval_large_anomalies_coverage_choices,
+    help='coverage policy of large anomalies when evaluating model-dependent ED methods'
+)
+# EXstream hyperparameters
+parsers['train_explainer'].add_argument(
+    '--exstream-fp-scaled-std-threshold', default=DEFAULTS['exstream_fp_scaled_std_threshold'], type=float,
+    help='scaled std threshold above which EXstream should define a feature as "false positive"'
+)
+# MacroBase hyperparameters
+parsers['train_explainer'].add_argument(
+    '--macrobase-n-bins', default=DEFAULTS['macrobase_n_bins'], type=int,
+    help='number of bins to use for MacroBase\'s histogram-based discretization'
+)
+parsers['train_explainer'].add_argument(
+    '--macrobase-min-support', default=DEFAULTS['macrobase_min_support'], type=is_percentage,
+    help='outlier support threshold to use for MacroBase\'s multi-item itemset filtering'
+)
+parsers['train_explainer'].add_argument(
+    '--macrobase-min-risk-ratio', default=DEFAULTS['macrobase_min_risk_ratio'], type=float,
+    help='relative risk ratio threshold to use for MacroBase\'s itemset filtering'
+)
+# LIME hyperparameters
+parsers['train_explainer'].add_argument(
+    '--lime-n-features', default=DEFAULTS['lime_n_features'], type=int,
+    help='number of features to report in the explanations derived by LIME'
 )
 
-# add data-specific arguments
-add_specific_args = importlib.import_module(f'utils.{os.getenv("USED_DATA").lower()}').add_specific_args
-EXTENDED_PIPELINE_STEPS = PIPELINE_STEPS + ['run_pipeline']
-for k in EXTENDED_PIPELINE_STEPS:
-    parsers = add_specific_args(parsers, k, EXTENDED_PIPELINE_STEPS)
-# add back `help` arguments to parsers
-for key in EXTENDED_PIPELINE_STEPS:
-    parsers[key].add_argument(
-        '-h', '--help', action='help', default=argparse.SUPPRESS, help='show this help message and exit'
+# additional arguments for `run_pipeline.py`
+parsers['run_pipeline'] = argparse.ArgumentParser(
+    parents=[parsers['train_explainer']], description='Run a complete pipeline', add_help=False
+)
+parsers['run_pipeline'].add_argument(
+    '--pipeline-type', default=DEFAULTS['pipeline_type'], choices=pipeline_type_choices,
+    help='type of pipeline to run (AD only, ED only or AD + ED)'
+)
+
+# add data-specific arguments and `help` arguments back to parsers
+add_specific_args = importlib.import_module(f'utils.{USED_DATA}').add_specific_args
+for k in CALLABLES:
+    parsers = add_specific_args(parsers, k, CALLABLES)
+    parsers[k].add_argument(
+        '-h', '--help', action='help',
+        default=argparse.SUPPRESS, help='show this help message and exit'
     )
 
 

@@ -15,8 +15,8 @@ from utils.common import (
 )
 from data.helpers import load_datasets_data
 from modeling.forecasting.helpers import get_trimmed_periods
-from metrics.evaluation import save_ad_evaluation
-from metrics.evaluators import evaluation_classes
+from metrics.evaluation import save_evaluation
+from metrics.ad_evaluators import evaluation_classes
 
 
 if __name__ == '__main__':
@@ -61,9 +61,9 @@ if __name__ == '__main__':
         scoring_data.pop(set_name)
 
     # save outlier score derivation performance
-    config_name, evaluation_string = get_args_string(args, 'scoring'), get_args_string(args, 'evaluation')
+    config_name, evaluation_string = get_args_string(args, 'scoring'), get_args_string(args, 'ad_evaluation')
     evaluator = evaluation_classes[args.evaluation_type](args)
-    save_ad_evaluation(
+    save_evaluation(
         'scoring', scoring_data, evaluator, evaluation_string, config_name,
         COMPARISON_PATH, used_data=args.data, method_path=OUTPUT_PATH
     )

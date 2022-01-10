@@ -37,12 +37,12 @@ SAMPLING_PERIOD = '1s'
 
 # spark-specific default values for the common command-line arguments
 DEFAULT_ARGS = {
-    # data partitioning arguments
+    # datasets constitution arguments
     'n_starting_removed': 0,
     'n_ending_removed': 0,
     'pre_sampling_period': '15s',
 
-    # data transformation arguments
+    # features alteration and transformation arguments
     'alter_bundles': 'spark_bundles',
     'alter_bundle_idx': 0,
     'sampling_period': '15s',
@@ -134,11 +134,11 @@ DEFAULT_ARGS = {
     'bigan_n_epochs': 200,
     'bigan_batch_size': 32,
 
-    # outlier score derivation arguments
+    # outlier score assignment arguments
     'scoring_method': 'mse',
     'mse_weight': 0.5,
 
-    # anomaly detection evaluation arguments
+    # supervised evaluation for assessing scoring performance
     'evaluation_type': 'ad2',
     'recall_alpha': 0.0,
     'recall_omega': 'default',
@@ -149,11 +149,37 @@ DEFAULT_ARGS = {
     'precision_gamma': 'dup',
     'f_score_beta': 1.0,
 
-    # threshold selection arguments
+    # outlier score threshold selection arguments
     'thresholding_method': ['std', 'mad', 'iqr'],
     'thresholding_factor': [1.5, 2.0, 2.5, 3.0],
     'n_iterations': [1, 2],
-    'removal_factor': [1.0]
+    'removal_factor': [1.0],
+
+    # explanation discovery arguments
+    'explanation_method': 'exstream',
+    'explained_predictions': 'ground.truth',
+    # ED evaluation parameters
+    'ed_eval_min_anomaly_length': 1,
+    'ed1_consistency_n_disturbances': 5,
+    # model-free evaluation
+    'mf_eval_min_normal_length': 1,
+    'mf_ed1_consistency_sampled_prop': 0.8,
+    'mf_ed1_accuracy_n_splits': 5,
+    'mf_ed1_accuracy_test_prop': 0.2,
+    # model-dependent evaluation
+    'md_eval_small_anomalies_expansion': 'both',
+    'md_eval_large_anomalies_coverage': 'end',
+    # EXstream
+    'exstream_fp_scaled_std_threshold': 1.64,
+    # MacroBase
+    'macrobase_n_bins': 10,
+    'macrobase_min_support': 0.4,
+    'macrobase_min_risk_ratio': 1.5,
+    # LIME
+    'lime_n_features': 5,
+
+    # pipeline execution shortcut arguments
+    'pipeline_type': 'ad.ed'
 }
 
 
@@ -175,7 +201,7 @@ def is_type_combination(x):
     if x in type_choices:
         return x
     raise argparse.ArgumentTypeError('Argument has to be either `.` for all trace types, '
-                                     f'or any dot-separated combination of {TRACE_TYPES}')
+                                     f'or else any dot-separated combination of {TRACE_TYPES}')
 
 
 def add_specific_args(parsers, pipeline_step, pipeline_steps):
@@ -185,11 +211,11 @@ def add_specific_args(parsers, pipeline_step, pipeline_steps):
 
     Args:
         parsers (dict): the existing parsers dictionary.
-        pipeline_step (str): the pipeline step to add arguments to (as the name of its main script).
-        pipeline_steps (list): the complete list of step names in the pipeline.
+        pipeline_step (str): the pipeline step to add arguments to (by the name of its main script).
+        pipeline_steps (list): the complete list of step names in the main AD pipeline.
 
     Returns:
-        dict: the new parsers, extended with Spark-specific arguments for the step.
+        dict: the new parsers extended with Spark-specific arguments for the step.
     """
     step_index = pipeline_steps.index(pipeline_step)
     new_parsers = copy.deepcopy(parsers)
@@ -199,8 +225,8 @@ def add_specific_args(parsers, pipeline_step, pipeline_steps):
         arg_names.append('--app-id')
         arg_params.append({
             'default': 1,
-            'type': int,
             'choices': [0] + list(set(APP_IDS) - {7, 8}),
+            'type': int,
             'help': 'application id (0 for all, we exclude 7 and 8 since they '
                     'respectively have no disturbed/undisturbed traces)'
         })

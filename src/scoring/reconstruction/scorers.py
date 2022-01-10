@@ -8,8 +8,8 @@ import numpy as np
 import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
+from data.helpers import get_sliding_windows
 from modeling.reconstruction.evaluation import get_mean_squared_error, get_feature_loss, get_discriminator_loss
-from modeling.reconstruction.helpers import get_period_windows
 
 
 class ReconstructionScorer:
@@ -78,7 +78,7 @@ class ReconstructionScorer:
         """
         # get scores for all consecutive windows of the period
         w = self.reconstructor.window_size
-        window_scores = self.score_windows(get_period_windows(period, w, 1))
+        window_scores = self.score_windows(get_sliding_windows(period, w, 1))
         # perform a rolling average on the scores with empty overlaps being filled with 0 values
         rolling_scores = np.convolve(window_scores, np.ones(w) / w, mode='full')
         # remove 0 values from consideration when computing edge averages
@@ -131,7 +131,7 @@ class ReconstructionScorer:
         periods_n_windows = []
         print('extracting and concatenating periods windows...', end=' ', flush=True)
         for period in periods:
-            period_windows = get_period_windows(period, self.reconstructor.window_size, 1)
+            period_windows = get_sliding_windows(period, self.reconstructor.window_size, 1)
             concat_windows.append(period_windows)
             periods_n_windows.append(period_windows.shape[0])
         concat_windows = np.concatenate(concat_windows, axis=0).astype(np.float64)

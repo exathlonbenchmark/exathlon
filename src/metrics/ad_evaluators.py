@@ -120,7 +120,7 @@ def extract_multiclass_ranges_ids(y):
     ranges_ids_dict = dict()
     for pc in pos_classes:
         # extract binary ranges setting the class label to 1 and all others to 0
-        ranges_ids_dict[pc] = extract_binary_ranges_ids(np.array((y == pc), dtype=int))
+        ranges_ids_dict[pc] = extract_binary_ranges_ids((y == pc).astype(int))
     return ranges_ids_dict
 
 
@@ -188,8 +188,8 @@ def get_overlapping_ranges(target_range, ranges):
     return np.array(overlaps)
 
 
-class Evaluator:
-    """Prediction evaluation base class.
+class ADEvaluator:
+    """Anomaly detection evaluation base class.
 
     Computes the Precision, Recall and F_{beta}-score for the predicted anomalies on a dataset.
 
@@ -269,7 +269,7 @@ class Evaluator:
         """
 
 
-class RangeEvaluator(Evaluator):
+class RangeEvaluator(ADEvaluator):
     """Range-based evaluation.
 
     The Precision and Recall metrics are defined for range-based time series anomaly detection.
@@ -528,7 +528,7 @@ class RangeEvaluator(Evaluator):
     }
 
 
-class PointEvaluator(Evaluator):
+class PointEvaluator(ADEvaluator):
     """Point-based evaluation.
 
     The Precision and Recall metrics are defined for point-based anomaly detection.

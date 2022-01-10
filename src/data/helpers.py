@@ -207,9 +207,27 @@ def extract_save_labels(period_dfs, labels_file_name, output_path, sampling_peri
 
     # save labels and return the periods without their `Anomaly` columns
     print(f'saving {labels_file_name} labels file...', end=' ', flush=True)
-    np.save(os.path.join(output_path, f'{labels_file_name}.npy'), np.array(labels_list, dtype=object))
+    np.save(os.path.join(output_path, f'{labels_file_name}.npy'), get_numpy_from_numpy_list(labels_list))
     print('done.')
     return new_periods
+
+
+def get_numpy_from_numpy_list(numpy_list):
+    """Returns the equivalent numpy array for the provided list of numpy arrays.
+
+    Args:
+        numpy_list (list): the list of numpy arrays to turn into a numpy array.
+
+    Returns:
+        ndarray: corresponding numpy array of shape `(list_length, ...)`. If the arrays
+            in the list have different shapes, the final array is returned with dtype object.
+    """
+    # if the numpy list contains a single ndarray or all its ndarrays have the same shape
+    if len(numpy_list) == 1 or len(set([a.shape for a in numpy_list])) == 1:
+        # return with original data type
+        return np.array(numpy_list)
+    # else return with data type "object"
+    return np.array(numpy_list, dtype=object)
 
 
 def get_numpy_from_dfs(period_dfs):
@@ -222,7 +240,7 @@ def get_numpy_from_dfs(period_dfs):
         ndarray: corresponding numpy array of shape `(n_periods, period_size, n_features)`.
             Where `period_size` depends on the period.
     """
-    return np.array([period_df.values for period_df in period_dfs], dtype=object)
+    return get_numpy_from_numpy_list([period_df.values for period_df in period_dfs])
 
 
 def get_dfs_from_numpy(periods, sampling_period):
@@ -257,3 +275,42 @@ def get_aligned_shuffle(array_1, array_2=None):
     if array_2 is None:
         return array_1[mask]
     return array_1[mask], array_2[mask]
+
+
+def get_sliding_windows(array, window_size, window_step, include_remainder=False, dtype=np.float64):
+    """Returns sliding windows of `window_size` elements extracted every `window_step` from `array`.
+
+    Args:
+        array (ndarray): input ndarray whose first axis will be used for extracting windows.
+        window_size (int): number of elements of the windows to extract.
+        window_step (int): step size between two adjacent windows to extract.
+        include_remainder (bool): whether to include any remaining window, with a different step size.
+        dtype (type): optional data type to enforce for the window elements (default np.float64).
+
+    Returns:
+        ndarray: windows array of shape `(n_windows, window_size, *array.shape[1:])`.
+    """
+    windows, start_idx = [], 0
+    while start_idx <= array.shape[0] - window_size:
+        windows.append(array[start_idx:(start_idx + window_size)])
+        start_idx += window_step
+    if include_remainder and start_idx - window_step + window_size != array.shape[0]:
+        windows.append(array[-window_size:])
+    return np.array(windows, dtype=dtype)
+
+
+def get_nansum(array, **kwargs):
+    """Returns the sum of array elements over a given axis treating NaNs as zero.
+
+    Same as `np.nansum`, expect NaN is returned instead of zero if all array elements are NaN.
+
+    Args:
+        array (ndarray): array whose sum of elements to compute.
+        **kwargs: optional keyword arguments to pass to `np.nansum`.
+
+    Returns:
+        float: the sum of array elements (or NaN if all NaNs).
+    """
+    if np.isnan(array).all():
+        return np.nan
+    return np.nansum(array, **kwargs)

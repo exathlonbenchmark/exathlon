@@ -25,8 +25,8 @@ from utils.common import (
 from data.helpers import load_mixed_formats, load_datasets_data
 from modeling.data_splitters import get_splitter_classes
 from modeling.forecasting.helpers import get_trimmed_periods
-from metrics.evaluation import save_ad_evaluation
-from metrics.evaluators import evaluation_classes
+from metrics.evaluation import save_evaluation
+from metrics.ad_evaluators import evaluation_classes
 from detection.detector import Detector
 
 
@@ -121,8 +121,8 @@ if __name__ == '__main__':
 
         # save final anomaly detection performance
         config_name = get_args_string(args, 'thresholding')
-        evaluation_string = get_args_string(args, 'evaluation')
-        save_ad_evaluation(
+        evaluation_string = get_args_string(args, 'ad_evaluation')
+        save_evaluation(
             'detection', thresholding_processed, evaluator, evaluation_string, config_name,
             COMPARISON_PATH, used_data=args.data, method_path=OUTPUT_PATH
         )

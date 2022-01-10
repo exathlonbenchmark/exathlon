@@ -1,6 +1,13 @@
 """Final detection helpers module.
 """
+import os
 import numpy as np
+
+# add absolute src directory to python path to import other project modules
+import sys
+src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
+sys.path.append(src_path)
+from data.helpers import get_numpy_from_numpy_list
 
 
 def threshold_period_scores(period_scores, threshold):
@@ -39,8 +46,4 @@ def threshold_scores(periods_scores, threshold):
     for period_length in [len(period) for period in periods_scores]:
         periods_preds.append(flattened_preds[cursor:cursor+period_length])
         cursor += period_length
-    periods_preds = np.array(periods_preds, dtype=object)
-    # if period lengths are the same, we do not want the elements to be of type object
-    if len(periods_preds.shape) > 1:
-        return periods_preds.astype(int)
-    return periods_preds
+    return get_numpy_from_numpy_list(periods_preds)

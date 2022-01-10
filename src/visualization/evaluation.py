@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
-from metrics.evaluators import get_auc
+from metrics.ad_evaluators import get_auc
 
 
 def plot_pr_curves(recalls, precisions, ts, *,

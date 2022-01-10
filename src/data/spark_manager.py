@@ -12,7 +12,7 @@ sys.path.append(src_path)
 from utils.common import PIPELINE_SET_NAMES
 from utils.spark import APP_IDS, TRACE_TYPES, ANOMALY_TYPES
 from data.data_managers import DataManager
-from metrics.evaluators import extract_binary_ranges_ids
+from metrics.ad_evaluators import extract_binary_ranges_ids
 
 
 def load_trace(trace_path):

@@ -11,9 +11,8 @@ import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
 from utils.common import MODELING_SET_NAMES, forecasting_choices, reconstruction_choices
-from data.helpers import get_aligned_shuffle
+from data.helpers import get_aligned_shuffle, get_sliding_windows
 from modeling.forecasting.helpers import get_period_sequence_target_pairs
-from modeling.reconstruction.helpers import get_period_windows
 
 
 def get_sampling_f_and_targets_presence(model_type):
@@ -31,7 +30,7 @@ def get_sampling_f_and_targets_presence(model_type):
     if model_type in forecasting_choices:
         sampling_f, are_targets = get_period_sequence_target_pairs, True
     else:
-        sampling_f, are_targets = get_period_windows, False
+        sampling_f, are_targets = get_sliding_windows, False
     print('done.')
     return sampling_f, are_targets
 
