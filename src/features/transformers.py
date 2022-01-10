@@ -24,7 +24,7 @@ def get_scaler(scaling_method, minmax_range=None):
 
     Args:
         scaling_method (str): scaling method (must be either `std`, `minmax` or `robust`)
-        minmax_range (list|None): optional output range if minmax scaling (defaults to `[0, 1]`).
+        minmax_range (list|None): optional output range if minmax scaling (default `[0, 1]`).
 
     Returns:
         StandardScaler|MinMaxScaler|RobustScaler: Scaler object for the method.
