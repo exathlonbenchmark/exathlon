@@ -46,6 +46,7 @@ def save_forecasting_evaluation(data_dict, forecaster, modeling_task_string, con
     # prepend training time information
     metrics, column_names = prepend_training_info(forecaster, metrics, column_names)
     evaluation_df = pd.DataFrame(columns=column_names, data=[metrics], index=[config_name])
+    evaluation_df.index.name = 'method'
 
     # add the new evaluation to the comparison spreadsheet, or create it if it does not exist
     try:

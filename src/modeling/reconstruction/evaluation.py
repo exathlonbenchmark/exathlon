@@ -47,6 +47,7 @@ def save_reconstruction_evaluation(data_dict, reconstructor, modeling_task_strin
     # prepend training time information
     metrics, column_names = prepend_training_info(reconstructor, metrics, column_names)
     evaluation_df = pd.DataFrame(columns=column_names, data=[metrics], index=[config_name])
+    evaluation_df.index.name = 'method'
 
     # add the new evaluation to the comparison spreadsheet, or create it if it does not exist
     try:
