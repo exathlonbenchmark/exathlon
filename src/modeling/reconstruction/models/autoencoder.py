@@ -29,7 +29,7 @@ def build_autoencoder(window_size, n_features, latent_dim=10, type_='dense',
         latent_dim (int): dimension of the latent vector representation (coding).
         type_ (str): type of autoencoder to build.
         enc_n_hidden_neurons (list): number of units for each hidden layer before the coding.
-        dec_last_activation (str): last decoder layer activation (either `linear or sigmoid`).
+        dec_last_activation (str): last decoder layer activation (either `linear` or `sigmoid`).
         dropout (float): dropout rate for feed-forward layers.
         dense_layers_activation (str): intermediate layers activation for dense architectures.
         rec_unit_type (str): type of recurrent unit (either "lstm" or "gru").
