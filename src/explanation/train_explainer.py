@@ -10,9 +10,8 @@ import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
 from utils.common import (
-    PIPELINE_TRAIN_NAME, PIPELINE_TEST_NAME, MODELING_TEST_NAME,
-    parsers, get_output_path, model_free_explanation_choices, model_dependent_explanation_choices,
-    forecasting_choices, get_modeling_task_and_classes, get_args_string, get_best_thresholding_args
+    PIPELINE_TRAIN_NAME, PIPELINE_TEST_NAME, MODELING_TEST_NAME, ANOMALY_TYPES, CHOICES,
+    parsers, get_output_path, get_modeling_task_and_classes, get_args_string, get_best_thresholding_args
 )
 from data.helpers import load_datasets_data, load_mixed_formats
 from modeling.data_splitters import get_splitter_classes
@@ -37,7 +36,7 @@ if __name__ == '__main__':
 
     # remove "unknown" anomalies from consideration if explaining ground-truth spark anomalies
     if args.data == 'spark' and args.explained_predictions == 'ground.truth':
-        unknown_class = importlib.import_module(f'utils.{args.data}').ANOMALY_TYPES.index('unknown') + 1
+        unknown_class = ANOMALY_TYPES.index('unknown') + 1
         for set_name in explanation_sets:
             for i in range(len(explanation_data[f'y_{set_name}'])):
                 unknown_mask = explanation_data[f'y_{set_name}'][i] == unknown_class
@@ -47,9 +46,9 @@ if __name__ == '__main__':
     explainer_args, training_samples = dict(), None
 
     # get ED method type
-    if args.explanation_method in model_dependent_explanation_choices:
+    if args.explanation_method in CHOICES['train_explainer']['model_dependent_explanation']:
         method_type = 'model_dependent'
-    elif args.explanation_method in model_free_explanation_choices:
+    elif args.explanation_method in CHOICES['train_explainer']['model_free_explanation']:
         method_type = 'model_free'
     else:
         raise ValueError('the provided ED method must be either "model-free" or "model-dependent"')
@@ -128,7 +127,7 @@ if __name__ == '__main__':
             for set_name in explanation_sets:
                 explanation_data[f'y_{set_name}'] = detector.predict(explanation_data[set_name])
                 # prepend negative predictions for the first records if forecasting-based detector
-                if args.model_type in forecasting_choices:
+                if args.model_type in CHOICES['train_model']['forecasting']:
                     for i in range(len(explanation_data[f'y_{set_name}'])):
                         explanation_data[f'y_{set_name}'][i] = np.concatenate([
                             np.zeros(shape=(args.n_back,), dtype=int),

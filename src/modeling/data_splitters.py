@@ -10,7 +10,7 @@ import numpy as np
 import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
-from utils.common import MODELING_SET_NAMES, forecasting_choices, reconstruction_choices
+from utils.common import MODELING_SET_NAMES, CHOICES
 from data.helpers import get_aligned_shuffle, get_sliding_windows
 from modeling.forecasting.helpers import get_period_sequence_target_pairs
 
@@ -25,9 +25,10 @@ def get_sampling_f_and_targets_presence(model_type):
         func, bool: sampling function and presence of sample targets for the provided type of model.
     """
     a_t = 'model type must be a supported forecasting or reconstruction-based method'
-    assert model_type in forecasting_choices + reconstruction_choices, a_t
+    assert model_type in CHOICES['train_model']['forecasting'] + \
+           CHOICES['train_model']['reconstruction'], a_t
     print(f'setting samples creation function for the {model_type} model...', end=' ', flush=True)
-    if model_type in forecasting_choices:
+    if model_type in CHOICES['train_model']['forecasting']:
         sampling_f, are_targets = get_period_sequence_target_pairs, True
     else:
         sampling_f, are_targets = get_sliding_windows, False

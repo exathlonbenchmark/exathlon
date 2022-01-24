@@ -2,6 +2,7 @@
 """
 import os
 import argparse
+import warnings
 import importlib
 
 import pandas as pd
@@ -21,8 +22,10 @@ PIPELINE_STEPS = [
     'train_detector',
     'train_explainer'
 ]
-# callable file names
-CALLABLES = PIPELINE_STEPS + ['run_pipeline']
+# reporting step name
+REPORTING_STEP = 'report_results'
+# callable file names relating to the explainable anomaly detection pipeline
+PIPELINE_CALLABLES = PIPELINE_STEPS + ['run_pipeline']
 # main pipeline and normality modeling dataset names
 PIPELINE_TRAIN_NAME, PIPELINE_TEST_NAME = 'train', 'test'
 MODELING_TRAIN_NAME, MODELING_VAL_NAME, MODELING_TEST_NAME = 'train', 'val', 'test'
@@ -36,10 +39,19 @@ OUTPUTS_ROOT = os.getenv('OUTPUTS_ROOT')
 INTERIM_ROOT = os.path.join(OUTPUTS_ROOT, 'data', 'interim')
 PROCESSED_ROOT = os.path.join(OUTPUTS_ROOT, 'data', 'processed')
 MODELS_ROOT = os.path.join(OUTPUTS_ROOT, 'models')
+REPORTS_ROOT = os.path.join(OUTPUTS_ROOT, 'reports')
 
 # a lot of default command-line arguments depend on the data we use
 USED_DATA = os.getenv('USED_DATA').lower()
-DEFAULTS = importlib.import_module(f'utils.{USED_DATA}').DEFAULT_ARGS
+DEFAULTS = importlib.import_module(f'utils.{USED_DATA}').PIPELINE_DEFAULT_ARGS
+REPORTING_DEFAULTS = importlib.import_module(f'utils.{USED_DATA}').REPORTING_DEFAULT_ARGS
+
+# anomaly types specified for the considered data
+try:
+    ANOMALY_TYPES = importlib.import_module(f'utils.{USED_DATA}').ANOMALY_TYPES
+except ImportError:
+    warnings.warn('No anomaly types were defined for the considered data.')
+    ANOMALY_TYPES = []
 
 
 def hyper_to_path(*parameters):
@@ -50,19 +62,21 @@ def hyper_to_path(*parameters):
     return '_'.join(map(str, parameters))
 
 
-def get_output_path(args, pipeline_step, output_details=None):
-    """Returns the output path for the specified step of the AD pipeline according to the command-line arguments.
+def get_output_path(args, execution_step, output_details=None):
+    """Returns the output path for the specified execution according to the command-line arguments.
 
     Args:
         args (argparse.Namespace): parsed command-line arguments.
-        pipeline_step (str): step of the AD pipeline, as the name of the main python file (without extension).
+        execution_step (str): execution step, as the name of its main python file (without extension).
         output_details (str|None): additional details in case there are several possible output paths for the step.
 
     Returns:
         str: the full output path.
     """
+    if execution_step == REPORTING_STEP:
+        return os.path.join(REPORTS_ROOT, get_args_string(args, 'reporting_methods'))
     path_extensions = dict()
-    step_index = PIPELINE_STEPS.index(pipeline_step)
+    step_index = PIPELINE_STEPS.index(execution_step)
     path_extensions['make_datasets'] = get_args_string(args, 'data')
     if step_index >= 1:
         path_extensions['build_features'] = get_args_string(args, 'features')
@@ -77,12 +91,12 @@ def get_output_path(args, pipeline_step, output_details=None):
         path_extensions['train_detector'] = get_args_string(args, 'thresholding')
     if step_index >= 5:
         path_extensions['train_explainer'] = get_args_string(args, 'explanation')
-    if pipeline_step == 'make_datasets':
+    if execution_step == 'make_datasets':
         return os.path.join(
             INTERIM_ROOT,
             path_extensions['make_datasets']
         )
-    if pipeline_step == 'build_features':
+    if execution_step == 'build_features':
         # we consider we want the output data path by default
         return os.path.join(
             PROCESSED_ROOT if output_details is None or output_details == 'data' else MODELS_ROOT,
@@ -90,9 +104,9 @@ def get_output_path(args, pipeline_step, output_details=None):
             path_extensions['build_features']
         )
     # explanation discovery run on ground-truth labels
-    if pipeline_step == 'train_explainer' and args.explained_predictions == 'ground.truth':
+    if execution_step == 'train_explainer' and args.explained_predictions == 'ground.truth':
         # no AD model involved at all: the chain is then just data => features => explanation
-        if args.explanation_method in model_free_explanation_choices:
+        if args.explanation_method in CHOICES['train_explainer']['model_free_explanation']:
             chain_ids = [PIPELINE_STEPS.index('make_datasets'), PIPELINE_STEPS.index('build_features'), step_index]
         # a scorer is explained: the chain is then data => features => scoring => explanation
         else:
@@ -110,7 +124,7 @@ def get_output_path(args, pipeline_step, output_details=None):
     )
     if output_details is None or output_details == 'model':
         return os.path.join(comparison_path, extensions_chain[-1])
-    assert output_details == 'comparison', f'specify `comparison` for the comparison path of `{pipeline_step}`'
+    assert output_details == 'comparison', f'specify `comparison` for the comparison path of `{execution_step}`'
     return comparison_path
 
 
@@ -201,10 +215,10 @@ def get_modeling_task_args(args):
         splitting_args += [args.n_period_strata]
     splitting_args += [args.modeling_val_prop, args.modeling_test_prop]
     task_name, task_args = '', []
-    if args.model_type in forecasting_choices:
+    if args.model_type in CHOICES['train_model']['forecasting']:
         task_name = 'fore'
         task_args += [args.n_back, args.n_forward]
-    elif args.model_type in reconstruction_choices:
+    elif args.model_type in CHOICES['train_model']['reconstruction']:
         task_name = 'reco'
         task_args += [args.window_size, args.window_step]
     return splitting_args + [task_name] + task_args
@@ -350,14 +364,14 @@ def get_ed_evaluation_args(args):
     """
     ed_evaluation_args = [args.ed_eval_min_anomaly_length, args.ed1_consistency_n_disturbances]
     # min normal length, subsampling and accuracy-related arguments are only relevant for model-free methods
-    if args.explanation_method in model_free_explanation_choices:
+    if args.explanation_method in CHOICES['train_explainer']['model_free_explanation']:
         ed_evaluation_args += [
             args.mf_eval_min_normal_length,
             args.mf_ed1_consistency_sampled_prop,
             args.mf_ed1_accuracy_n_splits, args.mf_ed1_accuracy_test_prop
         ]
     # anomaly coverage is only relevant for model-dependent methods
-    elif args.explanation_method in model_dependent_explanation_choices:
+    elif args.explanation_method in CHOICES['train_explainer']['model_dependent_explanation']:
         ed_evaluation_args += [
             args.md_eval_small_anomalies_expansion, args.md_eval_large_anomalies_coverage
         ]
@@ -374,7 +388,7 @@ def get_thresholding_args(args):
         list: relevant list of thresholding argument values corresponding to `args`.
     """
     thresholding_args = [args.thresholding_method]
-    if args.thresholding_method in two_stat_ts_sel_choices:
+    if args.thresholding_method in CHOICES['train_detector']['two_stat_ts_sel']:
         thresholding_args += [args.thresholding_factor, args.n_iterations, args.removal_factor]
     return thresholding_args
 
@@ -436,7 +450,7 @@ def get_explanation_args(args):
         list: relevant list of explanation discovery argument values corresponding to `args`.
     """
     explanation_args = [args.explanation_method]
-    if args.explanation_method in model_free_explanation_choices:
+    if args.explanation_method in CHOICES['train_explainer']['model_free_explanation']:
         if args.explanation_method == 'exstream':
             explanation_args += [args.exstream_fp_scaled_std_threshold]
         if args.explanation_method == 'macrobase':
@@ -446,6 +460,50 @@ def get_explanation_args(args):
     if args.explanation_method == 'lime':
         explanation_args += [args.lime_n_features]
     return explanation_args
+
+
+def get_reporting_methods_args(reporting_args):
+    """Returns the relevant and ordered list of argument values for the methods compared
+        in the reporting step from `reporting_args`.
+
+    Args:
+        reporting_args (argparse.Namespace): parsed reporting command-line arguments.
+
+    Returns:
+        list: relevant list of reporting methods argument values corresponding to `reporting_args`.
+    """
+    return [reporting_args.evaluation_step, reporting_args.compared_methods_id]
+
+
+def get_reporting_performance_args(reporting_args, include_agg_method=True):
+    """Returns the relevant and ordered list of argument values for the performance considered
+        in the reporting step from `reporting_args`.
+
+    Note: including the "aggregation method" to the returned arguments should only be specified
+    if some results were actually aggregated, that is, if multiple argument values were provided
+    for at least some of the compared methods for the evaluation step.
+
+    Args:
+        reporting_args (argparse.Namespace): parsed reporting command-line arguments.
+        include_agg_method (bool): whether to include the aggregation method to the returned
+            argument values.
+
+    Returns:
+        list: relevant list of reporting performance argument values corresponding to `reporting_args`.
+    """
+    reporting_args_dict, reporting_performance_args = vars(reporting_args), []
+    if include_agg_method and reporting_args.report_type == 'table':
+        reporting_performance_args += [reporting_args.aggregation_method]
+    reporting_performance_args += [
+        reporting_args_dict[f'{reporting_args.evaluation_step}_set_name'],
+        reporting_args_dict[f'{reporting_args.evaluation_step}_metrics']
+    ]
+    if reporting_args.evaluation_step != 'modeling':
+        reporting_performance_args += [
+            reporting_args_dict[f'{reporting_args.evaluation_step}_granularity'],
+            reporting_args_dict[f'{reporting_args.evaluation_step}_anomaly_types']
+        ]
+    return reporting_performance_args + [reporting_args.report_type]
 
 
 # argument getter functions dictionary
@@ -458,11 +516,13 @@ ARGS_GETTER_DICT = {
     'ad_evaluation': get_ad_evaluation_args,
     'ed_evaluation': get_ed_evaluation_args,
     'thresholding': get_thresholding_args,
-    'explanation': get_explanation_args
+    'explanation': get_explanation_args,
+    'reporting_methods': get_reporting_methods_args,
+    'reporting_performance': get_reporting_performance_args
 }
 
 
-def get_args_string(args, args_getter_key):
+def get_args_string(args, args_getter_key, **kwargs):
     """Returns the arguments string for the provided command-line arguments and getter function.
 
     This string can be used as a prefix to make sure considered methods are comparable.
@@ -471,13 +531,14 @@ def get_args_string(args, args_getter_key):
         args (argparse.Namespace): parsed command-line arguments.
         args_getter_key (str): argument values list getter function.
             Must be a key of `ARGS_GETTER_DICT`.
+        **kwargs: optional keyword arguments to pass to the arguments getter function.
 
     Returns:
         str: the arguments string, in the regular path-like format.
     """
     a_t = f'the provided getter function key must be in {list(ARGS_GETTER_DICT.keys())}'
     assert args_getter_key in ARGS_GETTER_DICT.keys(), a_t
-    return hyper_to_path(*ARGS_GETTER_DICT[args_getter_key](args))
+    return hyper_to_path(*ARGS_GETTER_DICT[args_getter_key](args, **kwargs))
 
 
 def get_modeling_task_and_classes(args):
@@ -494,7 +555,7 @@ def get_modeling_task_and_classes(args):
     """
     from modeling.forecasting.forecasters import forecasting_classes
     from modeling.reconstruction.reconstructors import reconstruction_classes
-    if args.model_type in forecasting_choices:
+    if args.model_type in CHOICES['train_model']['forecasting']:
         return 'forecasting', forecasting_classes
     return 'reconstruction', reconstruction_classes
 
@@ -566,76 +627,118 @@ def is_percentage_or_int(x):
 # parsers for each callable script
 parsers = dict()
 
-# possible choices for categorical command-line arguments
-# MAKE_DATASETS
-data_choices = ['spark']
-
-# BUILD_FEATURES
-downsampling_position_choices = ['first', 'middle', 'last']
-alter_bundles_choices = ['.', 'spark_bundles']
-transform_choices = [
-    f'{s}{d}' for s in [
-        'regular_scaling', 'trace_scaling', 'head_scaling', 'head_online_scaling'
-    ] for d in ['', '.pca', '.fa']
-]
-scaling_choices = ['minmax', 'std', 'robust']
-kernel_choices = ['linear', 'rbf']
-reg_transformer_training_choices = ['all.training', 'largest.training']
-# when using `head_online_scaling`, the size of the rolling window is fixed to `head_size`
-online_window_choices = ['expanding', 'rolling']
-
-# TRAIN_MODEL
-forecasting_choices = ['naive.forecasting', 'rnn']
-reconstruction_choices = ['ae', 'bigan']
-modeling_split_choices = ['random.split', 'stratified.split']
-# model hyperparameters choices
-model_choices = forecasting_choices + reconstruction_choices
-activation_choices = ['relu', 'elu', 'sigmoid', 'linear']
-unit_choices = ['rnn', 'lstm', 'gru']
-opt_choices = ['sgd', 'adam', 'nadam', 'rmsprop', 'adadelta']
-ae_type_choices = ['dense', 'rec']
-enc_type_choices = gen_type_choices = dis_type_choices = ['rec', 'conv']
-ae_dec_last_act_choices = ['linear', 'sigmoid', 'elu']
-ae_loss_choices = ['mse', 'bce']
-bigan_gen_last_act_choices = ['linear', 'sigmoid', 'tanh']
-
-# TRAIN_SCORER
-forecasting_scoring_choices = ['re', 'nll']
-reconstruction_scoring_choices = ['mse', 'mse.dis', 'mse.ft']
-scoring_choices = forecasting_scoring_choices + reconstruction_scoring_choices
-# use point-based, custom range-based or default requirements evaluation
-evaluation_choices = ['point', 'range', *[f'ad{i}' for i in range(1, 5)]]
-# function choices for custom range-based evaluation
-# either default or normalized so that the size reward cannot exceed its equivalent under a flat bias
-omega_choices = ['default', 'flat.normalized']
-delta_choices = ['flat', 'front', 'back']
-# fully allow duplicates, fully penalize them or penalize them using an inverse polynomial penalty
-gamma_choices = ['dup', 'no.dup', 'inv.poly']
-
-# TRAIN_DETECTOR
-# methods for selecting the outlier score threshold
-two_stat_ts_sel_choices = ['std', 'mad', 'iqr']
-
-# TRAIN_EXPLAINER
-# explanation discovery methods (relying on a model or not)
-model_free_explanation_choices = ['exstream', 'macrobase']
-model_dependent_explanation_choices = ['lime']
-explanation_choices = model_free_explanation_choices + model_dependent_explanation_choices
-# whether to "explain" ground-truth labels or predictions from an AD method
-explained_predictions_choices = ['ground.truth', 'model']
-# model-dependent evaluation (expansion and coverage policies of small and large anomalies, respectively)
-md_eval_small_anomalies_expansion_choices = ['none', 'before', 'after', 'both']
-md_eval_large_anomalies_coverage_choices = ['all', 'center', 'end']
-
-# RUN_PIPELINE
-pipeline_type_choices = ['ad', 'ed', 'ad.ed']
+# possible choices for categorical command-line arguments (common to all data)
+CHOICES = {
+    'make_datasets': {
+        'data': ['spark']
+    },
+    'build_features': {
+        'downsampling_position': ['first', 'middle', 'last'],
+        'alter_bundles': ['.', 'spark_bundles'],
+        'transform_chain': [
+            f'{s}{d}' for s in [
+                'regular_scaling', 'trace_scaling', 'head_scaling', 'head_online_scaling'
+            ] for d in ['', '.pca', '.fa']
+        ],
+        'scaling_method': ['minmax', 'std', 'robust'],
+        'kernel': ['linear', 'rbf'],
+        'reg_transformer_training': ['all.training', 'largest.training'],
+        # when using `head_online_scaling`, the size of the rolling window is fixed to `head_size`
+        'online_window_type': ['expanding', 'rolling']
+    },
+    'train_model': {
+        'forecasting': ['naive.forecasting', 'rnn'],
+        'reconstruction': ['ae', 'bigan'],
+        'modeling_split': ['random.split', 'stratified.split'],
+        # model hyperparameters choices
+        'activation': ['relu', 'selu', 'elu', 'sigmoid', 'linear'],
+        'unit': ['rnn', 'lstm', 'gru'],
+        'optimizer': ['sgd', 'adam', 'nadam', 'rmsprop', 'adadelta'],
+        'ae_type': ['dense', 'rec'],
+        'ae_dec_last_activation': ['linear', 'sigmoid', 'elu'],
+        'ae_loss': ['mse', 'bce'],
+        'enc_type': ['rec', 'conv'],
+        'gen_type': ['rec', 'conv'],
+        'dis_type': ['rec', 'conv'],
+        'bigan_gen_last_activation': ['linear', 'sigmoid', 'tanh']
+    },
+    'train_scorer': {
+        'forecasting_scoring': ['re', 'nll'],
+        'reconstruction_scoring': ['mse', 'mse.dis', 'mse.ft'],
+        # use point-based, custom range-based or default requirements evaluation
+        'evaluation_type': ['point', 'range', *[f'ad{i}' for i in range(1, 5)]],
+        # function choices for custom range-based evaluation
+        # either default or normalized so that the size reward cannot exceed its equivalent under a flat bias
+        'omega': ['default', 'flat.normalized'],
+        'delta': ['flat', 'front', 'back'],
+        # fully allow duplicates, fully penalize them or penalize them using an inverse polynomial penalty
+        'gamma': ['dup', 'no.dup', 'inv.poly']
+    },
+    'train_detector': {
+        # methods for selecting the outlier score threshold
+        'two_stat_ts_sel': ['std', 'mad', 'iqr']
+    },
+    'train_explainer': {
+        # explanation discovery methods (relying on a model or not)
+        'model_free_explanation': ['exstream', 'macrobase'],
+        'model_dependent_explanation': ['lime'],
+        # whether to "explain" ground-truth labels or predictions from an AD method
+        'explained_predictions': ['ground.truth', 'model'],
+        # model-dependent evaluation (expansion and coverage policies of small and large anomalies, respectively)
+        'md_eval_small_anomalies_expansion': ['none', 'before', 'after', 'both'],
+        'md_eval_large_anomalies_coverage': ['all', 'center', 'end']
+    },
+    'run_pipeline': {
+        'pipeline_type': ['ad', 'ed', 'ad.ed']
+    },
+    'report_results': {
+        'evaluation_step': ['modeling', 'scoring', 'detection', 'explanation'],
+        'report_type': ['table'],
+        'aggregation_method': ['median'],
+        'modeling_set_name': ['train', 'val', 'test'],
+        'modeling_metrics': [
+            'n_epochs', 'avg_epoch_time', 'tot_train_time', 'mse', 'mae', 'dis_loss', 'ft_loss'
+        ],
+        **{f'{step}_set_name': ['test'] for step in ['scoring', 'detection', 'explanation']},
+        **{f'{step}_granularity': ['global'] for step in ['scoring', 'detection', 'explanation']},
+        **{
+            f'{step}_anomaly_types': ['global', 'all', 'avg', *[type_ for type_ in ANOMALY_TYPES]]
+            for step in ['scoring', 'detection', 'explanation']
+        },
+        **{
+            f'{step}_anomaly_avg_type': ['all', 'reported']
+            for step in ['scoring', 'detection', 'explanation']
+        },
+        'scoring_metrics': ['auprc'],
+        'detection_metrics': ['f_score', 'precision', 'recall'],
+        'explanation_metrics': [
+            'prop_covered', 'prop_explained', 'time',
+            *[
+                f'ed{i}_{m}' for i in [1, 2]
+                for m in ['conciseness', 'consistency', 'precision', 'recall', 'f1_score']
+            ]
+        ]
+    }
+}
+# add combined, higher-level, choices
+CHOICES['train_model']['model'] = \
+    CHOICES['train_model']['forecasting'] + \
+    CHOICES['train_model']['reconstruction']
+CHOICES['train_scorer']['scoring_method'] = \
+    CHOICES['train_scorer']['forecasting_scoring'] + \
+    CHOICES['train_scorer']['reconstruction_scoring']
+CHOICES['train_explainer']['explanation_method'] = \
+    CHOICES['train_explainer']['model_free_explanation'] + \
+    CHOICES['train_explainer']['model_dependent_explanation']
+# add data-specific possible choices
+CHOICES = importlib.import_module(f'utils.{USED_DATA}').add_specific_choices(CHOICES)
 
 # arguments for `make_datasets.py`
 parsers['make_datasets'] = argparse.ArgumentParser(
     description='Make train and test sets from the input data', add_help=False
 )
 parsers['make_datasets'].add_argument(
-    '--data', default=USED_DATA, choices=data_choices,
+    '--data', default=USED_DATA, choices=CHOICES['make_datasets']['data'],
     help='data to use as input to the pipeline'
 )
 for name in ['starting', 'ending']:
@@ -657,11 +760,13 @@ parsers['build_features'].add_argument(
     help='the records will be downsampled to the provided period'
 )
 parsers['build_features'].add_argument(
-    '--downsampling-position', default=DEFAULTS['downsampling_position'], choices=downsampling_position_choices,
+    '--downsampling-position', default=DEFAULTS['downsampling_position'],
+    choices=CHOICES['build_features']['downsampling_position'],
     help='whether to downsample periods first, last or between alteration and transformation'
 )
 parsers['build_features'].add_argument(
-    '--alter-bundles', default=DEFAULTS['alter_bundles'], choices=alter_bundles_choices,
+    '--alter-bundles', default=DEFAULTS['alter_bundles'],
+    choices=CHOICES['build_features']['alter_bundles'],
     help='list of features alteration bundles we want to choose from (`.` for none)'
 )
 parsers['build_features'].add_argument(
@@ -669,7 +774,8 @@ parsers['build_features'].add_argument(
     help='alteration bundle index in the bundles list we chose'
 )
 parsers['build_features'].add_argument(
-    '--transform-chain', default=DEFAULTS['transform_chain'], choices=transform_choices,
+    '--transform-chain', default=DEFAULTS['transform_chain'],
+    choices=CHOICES['build_features']['transform_chain'],
     help='features transformation chain, dot-separated (`.` for no transformation)'
 )
 parsers['build_features'].add_argument(
@@ -677,7 +783,8 @@ parsers['build_features'].add_argument(
     help='if relevant, number of records used at the beginning of each trace to train a transformer'
 )
 parsers['build_features'].add_argument(
-    '--online-window-type', default=DEFAULTS['online_window_type'], choices=online_window_choices,
+    '--online-window-type', default=DEFAULTS['online_window_type'],
+    choices=CHOICES['build_features']['online_window_type'],
     help='whether to use an expanding or rolling window when using head-online scaling'
 )
 parsers['build_features'].add_argument(
@@ -686,7 +793,8 @@ parsers['build_features'].add_argument(
     help='if not -1, use regular pretraining for head/head-online transformers with this weight'
 )
 parsers['build_features'].add_argument(
-    '--scaling-method', default=DEFAULTS['scaling_method'], choices=scaling_choices,
+    '--scaling-method', default=DEFAULTS['scaling_method'],
+    choices=CHOICES['build_features']['scaling_method'],
     help='feature (re)scaling method'
 )
 parsers['build_features'].add_argument(
@@ -694,7 +802,8 @@ parsers['build_features'].add_argument(
     help='range of output features if using minmax scaling'
 )
 parsers['build_features'].add_argument(
-    '--reg-scaler-training', default=DEFAULTS['reg_scaler_training'], choices=reg_transformer_training_choices,
+    '--reg-scaler-training', default=DEFAULTS['reg_scaler_training'],
+    choices=CHOICES['build_features']['reg_transformer_training'],
     help='whether to train the Regular Scaling model on all training traces or only the largest one'
 )
 parsers['build_features'].add_argument(
@@ -702,11 +811,13 @@ parsers['build_features'].add_argument(
     help='number of components or percentage of explained variance for PCA'
 )
 parsers['build_features'].add_argument(
-    '--pca-kernel', default=DEFAULTS['pca_kernel'], choices=kernel_choices,
+    '--pca-kernel', default=DEFAULTS['pca_kernel'],
+    choices=CHOICES['build_features']['kernel'],
     help='kernel for PCA'
 )
 parsers['build_features'].add_argument(
-    '--pca-training', default=DEFAULTS['pca_training'], choices=reg_transformer_training_choices,
+    '--pca-training', default=DEFAULTS['pca_training'],
+    choices=CHOICES['build_features']['reg_transformer_training'],
     help='whether to train the PCA model on all training traces or only the largest one'
 )
 parsers['build_features'].add_argument(
@@ -714,7 +825,8 @@ parsers['build_features'].add_argument(
     help='number of components to keep after Factor Analysis (FA)'
 )
 parsers['build_features'].add_argument(
-    '--fa-training', default=DEFAULTS['fa_training'], choices=reg_transformer_training_choices,
+    '--fa-training', default=DEFAULTS['fa_training'],
+    choices=CHOICES['build_features']['reg_transformer_training'],
     help='whether to train the Factor Analysis model on all training traces or only the largest one'
 )
 
@@ -724,7 +836,8 @@ parsers['train_model'] = argparse.ArgumentParser(
 )
 # train/val/test datasets constitution for the modeling task
 parsers['train_model'].add_argument(
-    '--modeling-split', default=DEFAULTS['modeling_split'], choices=modeling_split_choices,
+    '--modeling-split', default=DEFAULTS['modeling_split'],
+    choices=CHOICES['train_model']['modeling_split'],
     help='splitting strategy for constituting the modeling `train/val/test` sets'
 )
 parsers['train_model'].add_argument(
@@ -744,7 +857,8 @@ parsers['train_model'].add_argument(
     help='number of bins per period if using stratified modeling split'
 )
 parsers['train_model'].add_argument(
-    '--model-type', default=DEFAULTS['model_type'], choices=model_choices,
+    '--model-type', default=DEFAULTS['model_type'],
+    choices=CHOICES['train_model']['model'],
     help='type of model used to perform the downstream task'
 )
 # forecasting-specific arguments
@@ -776,7 +890,8 @@ parsers['train_model'].add_argument(
     help='number of neurons for each hidden layer of the RNN (before regression)'
 )
 parsers['train_model'].add_argument(
-    '--rnn-unit-type', default=DEFAULTS['rnn_unit_type'], choices=unit_choices,
+    '--rnn-unit-type', default=DEFAULTS['rnn_unit_type'],
+    choices=CHOICES['train_model']['unit'],
     help='type of recurrent units used by the network'
 )
 parsers['train_model'].add_argument(
@@ -794,7 +909,7 @@ parsers['train_model'].add_argument(
     help='latent dimension for the autoencoder'
 )
 parsers['train_model'].add_argument(
-    '--ae-type', default=DEFAULTS['ae_type'], choices=ae_type_choices,
+    '--ae-type', default=DEFAULTS['ae_type'], choices=CHOICES['train_model']['ae_type'],
     help='type of autoencoder network'
 )
 parsers['train_model'].add_argument(
@@ -803,18 +918,21 @@ parsers['train_model'].add_argument(
 )
 parsers['train_model'].add_argument(
     '--ae-dec-last-activation', default=DEFAULTS['ae_dec_last_activation'],
-    choices=ae_dec_last_act_choices, help='activation function of the last decoder layer'
+    choices=CHOICES['train_model']['ae_dec_last_activation'],
+    help='activation function of the last decoder layer'
 )
 parsers['train_model'].add_argument(
     '--ae-dropout', default=DEFAULTS['ae_dropout'], type=is_percentage,
     help='dropout rate for the feed-forward layers of the autoencoder'
 )
 parsers['train_model'].add_argument(
-    '--ae-dense-layers-activation', default=DEFAULTS['ae_dense_layers_activation'], choices=activation_choices,
+    '--ae-dense-layers-activation', default=DEFAULTS['ae_dense_layers_activation'],
+    choices=CHOICES['train_model']['activation'],
     help='activation function for the intermediate layers of the autoencoder (if dense)'
 )
 parsers['train_model'].add_argument(
-    '--ae-rec-unit-type', default=DEFAULTS['ae_rec_unit_type'], choices=unit_choices,
+    '--ae-rec-unit-type', default=DEFAULTS['ae_rec_unit_type'],
+    choices=CHOICES['train_model']['unit'],
     help='type of recurrent units used by the autoencoder (if recurrent)'
 )
 parsers['train_model'].add_argument(
@@ -822,7 +940,8 @@ parsers['train_model'].add_argument(
     help='dropout rate for the recurrent layers of the autoencoder'
 )
 parsers['train_model'].add_argument(
-    '--ae-loss', default=DEFAULTS['ae_loss'], choices=ae_loss_choices,
+    '--ae-loss', default=DEFAULTS['ae_loss'],
+    choices=CHOICES['train_model']['ae_loss'],
     help='loss function of the autoencoder'
 )
 # BiGAN hyperparameters
@@ -836,7 +955,11 @@ parsers['train_model'].add_argument(
 )
 for name, ch in zip(
         ['encoder', 'generator', 'discriminator'],
-        [enc_type_choices, gen_type_choices, dis_type_choices]
+        [
+            CHOICES['train_model']['enc_type'],
+            CHOICES['train_model']['gen_type'],
+            CHOICES['train_model']['dis_type']
+        ]
 ):
     abv = name[:3]
     parsers['train_model'].add_argument(
@@ -857,7 +980,7 @@ for name, ch in zip(
     )
     parsers['train_model'].add_argument(
         f'--bigan-{a_abv}-rec-unit-type',
-        default=DEFAULTS[f'bigan_{d_abv}_rec_unit_type'], choices=unit_choices,
+        default=DEFAULTS[f'bigan_{d_abv}_rec_unit_type'], choices=CHOICES['train_model']['unit'],
         help=f'type of recurrent units used by the {name} (if recurrent)'
     )
     parsers['train_model'].add_argument(
@@ -876,7 +999,8 @@ for name, ch in zip(
     )
 parsers['train_model'].add_argument(
     '--bigan-gen-last-activation', default=DEFAULTS['bigan_gen_last_activation'],
-    choices=bigan_gen_last_act_choices, help='activation function of the last generator layer'
+    choices=CHOICES['train_model']['bigan_gen_last_activation'],
+    help='activation function of the last generator layer'
 )
 # z path of the discriminator
 parsers['train_model'].add_argument(
@@ -895,7 +1019,8 @@ for mt, mt_name in zip(['rnn', 'ae', 'bigan'], ['RNN', 'autoencoder', 'BiGAN']):
         for n, text in zip(['dis', 'enc_gen'], ['discriminator', 'encoder and generator']):
             dashed_n = n.replace('_', '-')
             parsers['train_model'].add_argument(
-                f'--{mt}-{dashed_n}-optimizer', default=DEFAULTS[f'{mt}_{n}_optimizer'], choices=opt_choices,
+                f'--{mt}-{dashed_n}-optimizer', default=DEFAULTS[f'{mt}_{n}_optimizer'],
+                choices=CHOICES['train_model']['optimizer'],
                 help=f'optimization algorithm used for training the {text}'
             )
             parsers['train_model'].add_argument(
@@ -904,7 +1029,8 @@ for mt, mt_name in zip(['rnn', 'ae', 'bigan'], ['RNN', 'autoencoder', 'BiGAN']):
             )
     else:
         parsers['train_model'].add_argument(
-            f'--{mt}-optimizer', default=DEFAULTS[f'{mt}_optimizer'], choices=opt_choices,
+            f'--{mt}-optimizer', default=DEFAULTS[f'{mt}_optimizer'],
+            choices=CHOICES['train_model']['optimizer'],
             help=f'optimization algorithm used for training the {mt_name} network'
         )
         parsers['train_model'].add_argument(
@@ -925,7 +1051,8 @@ parsers['train_scorer'] = argparse.ArgumentParser(
     parents=[parsers['train_model']], description='Derive outlier scores from a trained model', add_help=False
 )
 parsers['train_scorer'].add_argument(
-    '--scoring-method', default=DEFAULTS['scoring_method'], choices=scoring_choices,
+    '--scoring-method', default=DEFAULTS['scoring_method'],
+    choices=CHOICES['train_scorer']['scoring_method'],
     help='outlier score derivation method'
 )
 parsers['train_scorer'].add_argument(
@@ -934,7 +1061,8 @@ parsers['train_scorer'].add_argument(
 )
 # parameters defining the Precision, Recall and F-score
 parsers['train_scorer'].add_argument(
-    '--evaluation-type', default=DEFAULTS['evaluation_type'], choices=evaluation_choices,
+    '--evaluation-type', default=DEFAULTS['evaluation_type'],
+    choices=CHOICES['train_scorer']['evaluation_type'],
     help='type of anomaly detection evaluation'
 )
 parsers['train_scorer'].add_argument(
@@ -943,7 +1071,11 @@ parsers['train_scorer'].add_argument(
 )
 for metric in ['recall', 'precision']:
     metric_text = metric.capitalize()
-    f_choices = [omega_choices, delta_choices, gamma_choices]
+    f_choices = [
+        CHOICES['train_scorer']['omega'],
+        CHOICES['train_scorer']['delta'],
+        CHOICES['train_scorer']['gamma']
+    ]
     for f_name, f_desc, choices in zip(['omega', 'delta', 'gamma'], ['size', 'bias', 'cardinality'], f_choices):
         parsers['train_scorer'].add_argument(
             f'--{metric}-{f_name}', default=DEFAULTS[f'{metric}_{f_name}'], choices=choices,
@@ -983,11 +1115,13 @@ parsers['train_explainer'] = argparse.ArgumentParser(
     description='Train an explanation discovery model to explain anomalies', add_help=False
 )
 parsers['train_explainer'].add_argument(
-    '--explanation-method', default=DEFAULTS['explanation_method'], choices=explanation_choices,
+    '--explanation-method', default=DEFAULTS['explanation_method'],
+    choices=CHOICES['train_explainer']['explanation_method'],
     help='explanation discovery method'
 )
 parsers['train_explainer'].add_argument(
-    '--explained-predictions', default=DEFAULTS['explained_predictions'], choices=explained_predictions_choices,
+    '--explained-predictions', default=DEFAULTS['explained_predictions'],
+    choices=CHOICES['train_explainer']['explained_predictions'],
     help='positive predictions to explain (either ground-truth or outputs of an AD model)'
 )
 # common evaluation parameters
@@ -1019,12 +1153,12 @@ parsers['train_explainer'].add_argument(
 # model-dependent evaluation parameters
 parsers['train_explainer'].add_argument(
     '--md-eval-small-anomalies-expansion', default=DEFAULTS['md_eval_small_anomalies_expansion'],
-    choices=md_eval_small_anomalies_expansion_choices,
+    choices=CHOICES['train_explainer']['md_eval_small_anomalies_expansion'],
     help='expansion policy of small anomalies when evaluating model-dependent ED methods'
 )
 parsers['train_explainer'].add_argument(
     '--md-eval-large-anomalies-coverage', default=DEFAULTS['md_eval_large_anomalies_coverage'],
-    choices=md_eval_large_anomalies_coverage_choices,
+    choices=CHOICES['train_explainer']['md_eval_large_anomalies_coverage'],
     help='coverage policy of large anomalies when evaluating model-dependent ED methods'
 )
 # EXstream hyperparameters
@@ -1056,18 +1190,54 @@ parsers['run_pipeline'] = argparse.ArgumentParser(
     parents=[parsers['train_explainer']], description='Run a complete pipeline', add_help=False
 )
 parsers['run_pipeline'].add_argument(
-    '--pipeline-type', default=DEFAULTS['pipeline_type'], choices=pipeline_type_choices,
+    '--pipeline-type', default=DEFAULTS['pipeline_type'],
+    choices=CHOICES['run_pipeline']['pipeline_type'],
     help='type of pipeline to run (AD only, ED only or AD + ED)'
 )
 
 # add data-specific arguments and `help` arguments back to parsers
 add_specific_args = importlib.import_module(f'utils.{USED_DATA}').add_specific_args
-for k in CALLABLES:
-    parsers = add_specific_args(parsers, k, CALLABLES)
+for k in PIPELINE_CALLABLES:
+    parsers = add_specific_args(parsers, k, PIPELINE_CALLABLES)
     parsers[k].add_argument(
         '-h', '--help', action='help',
         default=argparse.SUPPRESS, help='show this help message and exit'
     )
+
+# additional arguments for `report_results.py`
+parsers['report_results'] = argparse.ArgumentParser(description='Report performance of the specified method(s)')
+# reporting methods arguments
+parsers['report_results'].add_argument(
+    '--evaluation-step', default=REPORTING_DEFAULTS['evaluation_step'],
+    choices=CHOICES['report_results']['evaluation_step'],
+    help='evaluation step to report performance for (modeling, scoring, detection or explanation)'
+)
+parsers['report_results'].add_argument(
+    '--compared-methods-id', default=REPORTING_DEFAULTS['compared_methods_id'], type=int,
+    help='unique identifier to manually update when running a new methods comparison to save'
+)
+# general reporting performance arguments
+parsers['report_results'].add_argument(
+    '--report-type', default=REPORTING_DEFAULTS['report_type'],
+    choices=CHOICES['report_results']['report_type'], help='type of report to produce'
+)
+parsers['report_results'].add_argument(
+    '--aggregation-method', default=REPORTING_DEFAULTS['aggregation_method'],
+    choices=CHOICES['report_results']['aggregation_method'],
+    help='method used to aggregate argument combinations in table reporting'
+)
+# step-specific reporting performance arguments
+for step in CHOICES['report_results']['evaluation_step']:
+    arg_names, nargs_list = ['set_name', 'metrics'], [dict(), {'nargs': '+'}]
+    if step != 'modeling':
+        arg_names += ['granularity', 'anomaly_types', 'anomaly_avg_type']
+        nargs_list += [dict(), {'nargs': '+'}, dict()]
+    for arg_name, nargs in zip(arg_names, nargs_list):
+        parsers['report_results'].add_argument(
+            f'--{step}-{arg_name.replace("_", "-")}', default=REPORTING_DEFAULTS[f'{step}_{arg_name}'],
+            **nargs, choices=CHOICES['report_results'][f'{step}_{arg_name}'],
+            help=f'{arg_name.replace("_", " ").capitalize()} to use in the {step} performance reporting'
+        )
 
 
 def get_command_line_string(args_namespace, script_name):
@@ -1090,13 +1260,49 @@ def get_script_args_as_formatted_dict(args_ns, script_name):
             entered by a user: `True` = present, `False` = absent.
     """
     # only keep arguments defined for the script name
-    args_dict = {key_: v for key_, v in vars(args_ns).items() if key_ in [
-        e.dest for e in parsers[script_name]._actions if e.dest != 'help'
-    ]}
+    args_dict = get_script_args_dict(vars(args_ns), script_name)
     # remove `False` arguments and empty out values of `True` arguments
     args_dict = get_handled_store_true(args_dict)
     # turn the dictionary keys into command-line argument names
     return {('--' + key_).replace('_', '-'): v for key_, v in args_dict.items()}
+
+
+def get_script_args_dict(args_dict, script_name, remove_irrelevant=False):
+    """Returns the subset of `args_dict` defined for `script_name`.
+
+    Args:
+        args_dict (dict): the larger set of parsed command-line arguments, as a dictionary.
+        script_name (str): we want to restrict the arguments to the ones defined for this script name.
+        remove_irrelevant (bool): whether to remove irrelevant arguments depending on some argument values.
+            For now, only relevant for an explanation step explaining ground-truth labels.
+
+    Returns:
+        dict: the restricted arguments.
+    """
+    script_dict = {
+        key_: v for key_, v in args_dict.items()
+        if key_ in [e.dest for e in parsers[script_name]._actions if e.dest != 'help']
+    }
+    if not remove_irrelevant or script_name != 'train_explainer' or args_dict['explained_predictions'] == 'model':
+        # return all argument values for the provided step
+        return script_dict
+    # remove irrelevant arguments for explanation discovery explaining ground-truth labels
+    mf_choices, md_choices = CHOICES['train_explainer']['model_free'], CHOICES['train_explainer']['model_dependent']
+    assert script_dict['explanation_method'] in mf_choices + md_choices
+    # model-dependent methods do not need detection args; model-free modeling, scoring and detection args
+    last_relevant_script = 'build_features' if script_dict['explanation_method'] in mf_choices else 'train_scorer'
+    return get_dicts_difference(
+        script_dict,
+        get_dicts_difference(
+            get_script_args_dict(script_dict, 'train_detector'),
+            get_script_args_dict(script_dict, last_relevant_script)
+        )
+    )
+
+
+def get_dicts_difference(dict_1, dict_2):
+    """Returns `dict_1` without elements whose keys are `dict_2`"""
+    return {key: dict_1[key] for key in set(dict_1) - set(dict_2)}
 
 
 def get_handled_store_true(args_dict):

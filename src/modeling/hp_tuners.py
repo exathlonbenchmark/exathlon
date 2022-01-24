@@ -11,7 +11,7 @@ from keras_tuner.tuners import BayesianOptimization
 import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
-from utils.common import get_args_string, forecasting_choices, reconstruction_choices
+from utils.common import get_args_string, CHOICES
 from modeling.forecasting.evaluation import save_forecasting_evaluation
 from modeling.reconstruction.evaluation import save_reconstruction_evaluation
 
@@ -94,12 +94,13 @@ class BayesianTuner(BayesianOptimization):
         # save model's training, validation and test performance for comparison
         args = self.normality_modeler.args
         a_t = 'model type must be a supported forecasting or reconstruction-based method'
-        assert args.model_type in forecasting_choices + reconstruction_choices, a_t
+        assert args.model_type in CHOICES['train_model']['forecasting'] + \
+               CHOICES['train_model']['reconstruction'], a_t
         modeling_task = get_args_string(args, 'modeling_task')
         config_name = get_args_string(args, 'model') + f'_{time.strftime("run.%Y.%m.%d.%H.%M.%S")}'
         print(f'saving model performance to {self.comparison_path} at index {config_name}')
         # set the trial's model as the model used by the normality modeler
         self.normality_modeler.model = trial_model
-        f = save_forecasting_evaluation if args.model_type in forecasting_choices \
+        f = save_forecasting_evaluation if args.model_type in CHOICES['train_model']['forecasting'] \
             else save_reconstruction_evaluation
         f(self.data, self.normality_modeler, modeling_task, config_name, self.comparison_path)

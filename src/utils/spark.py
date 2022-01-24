@@ -35,8 +35,8 @@ def get_app_from_name(file_name): return int(file_name.split('_')[0])
 # original sampling period of records
 SAMPLING_PERIOD = '1s'
 
-# spark-specific default values for the common command-line arguments
-DEFAULT_ARGS = {
+# spark-specific default values for the common pipeline command-line arguments
+PIPELINE_DEFAULT_ARGS = {
     # datasets constitution arguments
     'n_starting_removed': 0,
     'n_ending_removed': 0,
@@ -167,8 +167,8 @@ DEFAULT_ARGS = {
     'mf_ed1_accuracy_n_splits': 5,
     'mf_ed1_accuracy_test_prop': 0.2,
     # model-dependent evaluation
-    'md_eval_small_anomalies_expansion': 'both',
-    'md_eval_large_anomalies_coverage': 'end',
+    'md_eval_small_anomalies_expansion': 'before',
+    'md_eval_large_anomalies_coverage': 'all',
     # EXstream
     'exstream_fp_scaled_std_threshold': 1.64,
     # MacroBase
@@ -179,7 +179,43 @@ DEFAULT_ARGS = {
     'lime_n_features': 5,
 
     # pipeline execution shortcut arguments
-    'pipeline_type': 'ad.ed'
+    'pipeline_type': 'ad.ed',
+}
+# spark-specific default values for the common reporting command-line arguments
+REPORTING_DEFAULT_ARGS = {
+    # reported evaluation step and compared methods
+    'evaluation_step': 'scoring',
+    'compared_methods_id': 1,
+    # type of performance reporting and potential aggregation method
+    'report_type': 'table',
+    'aggregation_method': 'median',
+    # compared modeling performance
+    'modeling_set_name': 'test',
+    'modeling_metrics': ['mse'],
+    # compared scoring performance
+    'scoring_set_name': 'test',
+    'scoring_metrics': ['auprc'],
+    'scoring_granularity': 'global',
+    'scoring_anomaly_types': ['avg', 'all'],
+    # type of anomaly types average if relevant
+    'scoring_anomaly_avg_type': 'all_but_unknown',
+    # compared detection performance
+    'detection_set_name': 'test',
+    'detection_metrics': ['f_score', 'precision', 'recall'],
+    'detection_granularity': 'global',
+    'detection_anomaly_types': ['global'],
+    'detection_anomaly_avg_type': 'all_but_unknown',
+    # compared explanation performance
+    'explanation_set_name': 'test',
+    'explanation_metrics': [
+        'ed2_conciseness',
+        'ed1_norm_consistency', 'ed2_norm_consistency',
+        'ed1_precision', 'ed1_recall',
+        'ed2_precision', 'ed2_recall'
+    ],
+    'explanation_granularity': 'global',
+    'explanation_anomaly_types': ['all'],
+    'explanation_anomaly_avg_type': 'all_but_unknown'
 }
 
 
@@ -249,3 +285,26 @@ def add_specific_args(parsers, pipeline_step, pipeline_steps):
         for step in pipeline_steps[step_index:]:
             new_parsers[step].add_argument(arg_name, **arg_params[i])
     return new_parsers
+
+
+def add_specific_choices(choices):
+    """Adds Spark-specific command-line argument options to the input choices.
+
+    Args:
+        choices (dict): the existing choices dictionary.
+
+    Returns:
+        dict: the new choices extended with the Spark-specific options.
+    """
+    extended_choices = copy.deepcopy(choices)
+    # performance reporting choices
+    app_choices = [f'app{app_id}' for app_id in APP_IDS]
+    trace_choices = [t[:-4] for a in app_choices for t in os.listdir(DATA_PATHS_DICT[a])]
+    for evaluation_step in ['scoring', 'detection', 'explanation']:
+        # granularity reporting choices
+        extended_choices['report_results'][f'{evaluation_step}_granularity'] += [
+            'app_avg', *app_choices, 'trace_avg', *trace_choices
+        ]
+        # type of anomaly types average reporting choices
+        extended_choices['report_results'][f'{evaluation_step}_anomaly_avg_type'] += ['all_but_unknown']
+    return extended_choices
