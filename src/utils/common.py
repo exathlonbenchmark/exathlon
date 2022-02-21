@@ -159,10 +159,12 @@ def get_features_args(args):
     Returns:
         list: relevant list of features building argument values corresponding to `args`.
     """
-    downsampling_args = [args.sampling_period]
-    # downsampling position only has an impact if downsampling is applied
-    if args.sampling_period != args.pre_sampling_period:
-        downsampling_args += [args.downsampling_position]
+    downsampling_args = []
+    # only include downsampling arguments if downsampling is applied
+    if args.data_sampling_period != args.pre_sampling_period:
+        downsampling_args += [args.data_sampling_period, args.data_downsampling_position]
+    if args.labels_sampling_period != args.pre_sampling_period:
+        downsampling_args += [args.labels_sampling_period]
     alter_args = []
     if args.alter_bundles != '.':
         alter_args += [args.alter_bundles.replace('_bundles', ''), args.alter_bundle_idx]
@@ -633,7 +635,7 @@ CHOICES = {
         'data': ['spark']
     },
     'build_features': {
-        'downsampling_position': ['first', 'middle', 'last'],
+        'data_downsampling_position': ['first', 'middle', 'last'],
         'alter_bundles': ['.', 'spark_bundles'],
         'transform_chain': [
             f'{s}{d}' for s in [
@@ -756,13 +758,17 @@ parsers['build_features'] = argparse.ArgumentParser(
     parents=[parsers['make_datasets']], description='Build features for the model inputs', add_help=False
 )
 parsers['build_features'].add_argument(
-    '--sampling-period', default=DEFAULTS['sampling_period'],
-    help='the records will be downsampled to the provided period'
+    '--data-sampling-period', default=DEFAULTS['data_sampling_period'],
+    help='the data records will be downsampled to the provided period'
 )
 parsers['build_features'].add_argument(
-    '--downsampling-position', default=DEFAULTS['downsampling_position'],
-    choices=CHOICES['build_features']['downsampling_position'],
-    help='whether to downsample periods first, last or between alteration and transformation'
+    '--data-downsampling-position', default=DEFAULTS['data_downsampling_position'],
+    choices=CHOICES['build_features']['data_downsampling_position'],
+    help='whether to downsample records first, last or between alteration and transformation'
+)
+parsers['build_features'].add_argument(
+    '--labels-sampling-period', default=DEFAULTS['labels_sampling_period'],
+    help='the labels will be downsampled to the provided period'
 )
 parsers['build_features'].add_argument(
     '--alter-bundles', default=DEFAULTS['alter_bundles'],

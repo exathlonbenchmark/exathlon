@@ -75,8 +75,8 @@ def apply_alteration_bundle(period_df, alteration_bundle):
         for alteration_step in alteration_chain.split('.'):
             alteration_specs = alteration_step.split('_')
             chain_output_df = alteration_f_dict[alteration_specs[0]](chain_output_df, *alteration_specs[1:])
-        # add the chain output to the period (only keeping rows for which it provided values)
-        result_df = result_df.assign(**chain_output_df).dropna()
+        # add the chain output to the period (filling missing rows forwards, then backwards)
+        result_df = result_df.assign(**chain_output_df).ffill().bfill()
 
     # add back any `Anomaly` column to the records that were not dropped in the process (implicit join)
     if 'Anomaly' in period_df:

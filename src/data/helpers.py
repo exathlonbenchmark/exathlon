@@ -27,23 +27,36 @@ def is_string_type(str_, type_=float):
         return False
 
 
-def get_resampled(period_dfs, sampling_period, agg='mean', anomaly_col=False):
+def get_resampled(period_dfs, sampling_period, agg='mean', anomaly_col=False, pre_sampling_period=None):
     """Returns the period DataFrames resampled to `sampling_period` using the
         provided aggregation function.
+
+    If `anomaly_col` is False, periods indices will also be reset to start from a round date,
+    in order to keep them aligned with any subsequently resampled labels.
 
     Args:
         period_dfs (list): the period DataFrames to resample.
         sampling_period (str): the new sampling period, as a valid argument to `pd.Timedelta`.
         agg (str): the aggregation function defining the resampling (e.g. `mean`, `median` or `max`).
         anomaly_col (bool): whether the provided DataFrames have an `Anomaly` column, to resample differently.
+        pre_sampling_period (str|None): original sampling period of the DataFrames.
+            If None and `anomaly_col` is False, the original sampling period will be inferred
+            from the first two records of the first DataFrame.
 
     Returns:
         list: the same periods with resampled records.
     """
-    resampled_dfs, sampling_p = [], pd.Timedelta(sampling_period)
+    resampled_dfs, sampling_p, pre_sampling_p = [], pd.Timedelta(sampling_period), None
     feature_cols = [c for c in period_dfs[0].columns if c != 'Anomaly']
+    if not anomaly_col:
+        # turn any original sampling period to type `pd.Timedelta`
+        pre_sampling_p = pd.Timedelta(np.diff(period_dfs[0].index[:2])[0]) \
+            if pre_sampling_period is None else pd.Timedelta(pre_sampling_period)
     print(f'resampling periods applying records `{agg}` every {sampling_period}...', end=' ', flush=True)
     for df in period_dfs:
+        if not anomaly_col:
+            # reindex the period DataFrame to start from a round date before downsampling
+            df = df.set_index(pd.date_range('01-01-2000', periods=len(df), freq=pre_sampling_p))
         resampled_df = df[feature_cols].resample(sampling_p).agg(agg).ffill().bfill()
         if anomaly_col:
             # if no records during `sampling_p`, we choose to simply repeat the label of the last one here
@@ -168,9 +181,8 @@ def load_datasets_data(input_path, info_path, dataset_names):
 def extract_save_labels(period_dfs, labels_file_name, output_path, sampling_period=None, pre_sampling_period=None):
     """Extracts and saves labels from the `Anomaly` columns of the provided period DataFrames.
 
-    If labels are resampled before being saved, their indices are first reset to start from 0 second.
-    We do this to keep them aligned with any subsequently resampled periods data (which would then be
-    resampled after having been converted to numpy arrays, hence without their datetime index).
+    If labels are resampled before being saved, their indices will also be reset to start
+    from a round date, in order to keep them aligned with any subsequently resampled records.
 
     Args:
         period_dfs (list): list of period pd.DataFrame.
@@ -180,8 +192,8 @@ def extract_save_labels(period_dfs, labels_file_name, output_path, sampling_peri
         sampling_period (str|None): if specified, period to resample the labels to before saving them
             (as a valid argument to `pd.Timedelta`).
         pre_sampling_period (str|None): original sampling period of the DataFrames.
-            If None and `sampling_period` is specified, the original sampling period is inferred from
-            the first two records of the first DataFrame.
+            If None and `sampling_period` is specified, the original sampling period
+            will be inferred from the first two records of the first DataFrame.
 
     Returns:
         list: the input periods without their `Anomaly` columns.
@@ -314,3 +326,87 @@ def get_nansum(array, **kwargs):
     if np.isnan(array).all():
         return np.nan
     return np.nansum(array, **kwargs)
+
+
+def get_matching_sampling(arrays, target_arrays, agg_func=np.max):
+    """Returns `arrays` resampled so as to match the sampling period of `target_arrays`.
+
+    All arrays within `arrays` and `target_arrays` are expected to have the same sampling period.
+    `arrays` and `target_arrays` are expected to match, in the sense that they should contain the
+    same number of elements, but just expressed using different sampling periods.
+
+    Hence, if `arrays` contain more (resp., less) records than `target_arrays`, `arrays` will
+    be downsampled (resp., upsampled). If relevant, `agg_func` will be used to downsample `arrays`.
+
+    Args:
+        arrays (ndarray): arrays to resample along the first axis, of shape
+            `(n_arrays, array_length, ...)`, with `array_length` depending on the array.
+        target_arrays (ndarray): arrays whose lengths to match in the same format.
+        agg_func (func): the numpy aggregation function to apply in case `arrays` need to be downsampled.
+
+    Returns:
+        ndarray: resampled `arrays`, in the same format but with the same lengths as `target_arrays`.
+    """
+    a_t = 'the number of arrays should match the number of target arrays'
+    assert len(arrays) == len(target_arrays), a_t
+    if len(arrays[0]) <= len(target_arrays[0]):
+        # upsample records of arrays
+        f, kwargs = get_upsampled, dict()
+    else:
+        # downsample records of arrays using the provided aggregation function
+        f, kwargs = get_downsampled, {'agg_func': agg_func}
+    return get_numpy_from_numpy_list([f(a, len(ta), **kwargs) for a, ta in zip(arrays, target_arrays)])
+
+
+def get_upsampled(array, target_length):
+    """Returns `array` upsampled so as to have `target_length` elements.
+
+    Upsampling is performed by repeating every array elements a fixed number of times.
+    If `target_length` is not a multiple of the original array's length, the repetition factor
+    is set so as to minimize the number of elements to add or remove to match `target_length`.
+
+    Examples ([-X-] refers to element removal, [+X+] to element addition):
+        From length 3 to 11: ABC => AAAA BBBB CCC[-C-]
+        From length 3 to 10: ABC => AAA BBB CCC[+C+]
+        From length 4 to 10: ABCD => AA BB CC DD[+DD+]
+
+    The last example illustrates that in case of an equal number of elements to add or
+    remove, we favor elements addition.
+
+    Args:
+        array (ndarray): the array to upsample of shape `(array_length, ...)`.
+        target_length (int): the number of elements to reach for `array`.
+
+    Returns:
+        array (ndarray): the upsampled array of shape `(target_length, ...)`.
+    """
+    repetition_factor = round(target_length / len(array))
+    upsampled = np.repeat(array, repetition_factor)
+    length_diff = target_length - len(upsampled)
+    if length_diff >= 0:
+        upsampled = np.concatenate([upsampled, [upsampled[-1] for _ in range(length_diff)]])
+    else:
+        # `length_diff` is negative here
+        upsampled = upsampled[:length_diff]
+    return upsampled
+
+
+def get_downsampled(array, target_length, agg_func=np.max):
+    """Returns `array` downsampled so as to have `target_length` elements.
+
+    Args:
+        array (ndarray): the array to downsample of shape `(array_length, ...)`.
+        target_length (int): the number of elements to reach for `array`.
+        agg_func (func): the numpy aggregation function to apply when downsampling `array`.
+
+    Returns:
+        array (ndarray): the downsampled array of shape `(target_length, ...)`.
+    """
+    array_length = len(array)
+    window_size = round(array_length / target_length)
+    jumping_windows = get_sliding_windows(
+        array, window_size, window_size,
+        include_remainder=window_size * target_length >= array_length,
+        dtype=array.dtype
+    )
+    return get_numpy_from_numpy_list([agg_func(w) for w in jumping_windows])

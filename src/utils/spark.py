@@ -40,13 +40,17 @@ PIPELINE_DEFAULT_ARGS = {
     # datasets constitution arguments
     'n_starting_removed': 0,
     'n_ending_removed': 0,
+    # optional downsampling to perform on both data and labels to save storage
     'pre_sampling_period': '15s',
 
     # features alteration and transformation arguments
     'alter_bundles': 'spark_bundles',
     'alter_bundle_idx': 0,
-    'sampling_period': '15s',
-    'downsampling_position': 'first',
+    # final sampling period to use for data records
+    'data_sampling_period': '15s',
+    'data_downsampling_position': 'last',
+    # final sampling period to use for labels
+    'labels_sampling_period': '15s',
     'transform_chain': 'trace_scaling',
     # if a transformation step is repeated, the same arguments are used for all its instances
     'head_size': 240,

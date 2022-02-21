@@ -19,6 +19,7 @@ import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
 from utils.spark import get_app_from_name
+from data.helpers import get_matching_sampling
 from metrics.ad_evaluators import get_auc
 from visualization.evaluation import plot_pr_curves
 from visualization.functions import plot_curves
@@ -184,6 +185,14 @@ def save_evaluation(evaluation_step, data_dict, evaluator, evaluation_string, co
             )
         )
         evaluation_df = set_evaluation_dfs[-1]
+
+        # align sampling periods of the current dataset elements
+        if evaluation_step in ['scoring', 'detection']:
+            # upsample model predictions to match the sampling period of labels
+            periods_preds = get_matching_sampling(periods_preds, periods_labels)
+        else:
+            # downsample labels or model predictions to match the sampling period of data records
+            periods_labels = get_matching_sampling(periods_labels, periods_preds, agg_func=np.max)
 
         # add metrics when considering all traces and applications the same
         print('computing metrics "globally".')

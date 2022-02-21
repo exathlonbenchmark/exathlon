@@ -1,7 +1,7 @@
 """Features building module.
 
 Turns the raw period columns to the final features that will be used by the models.
-If specified, this pipeline step can also resample the periods to a new sampling period.
+If specified, this pipeline step can also resample the records and/or labels to new sampling periods.
 """
 import os
 
@@ -9,7 +9,7 @@ import os
 import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
-from utils.common import PIPELINE_SET_NAMES, parsers, get_output_path
+from utils.common import PIPELINE_SET_NAMES, CHOICES, parsers, get_output_path
 from data.helpers import (
     load_files, save_files, extract_save_labels,
     get_resampled, get_numpy_from_dfs, get_dfs_from_numpy
@@ -30,33 +30,41 @@ if __name__ == '__main__':
     # load datasets
     datasets = load_files(INPUT_DATA_PATH, PIPELINE_SET_NAMES, 'pickle')
 
+    # extract, optionally downsample, and save labels from the `Anomaly` columns of the dataset periods
+    os.makedirs(OUTPUT_DATA_PATH, exist_ok=True)
+    labels_downsampling = args.labels_sampling_period != args.pre_sampling_period
+    labels_sampling_period = args.labels_sampling_period if labels_downsampling else None
+    print(f'{"downsampling and " if labels_downsampling else ""}saving labels to {OUTPUT_DATA_PATH}')
+    for k in datasets:
+        datasets[k] = extract_save_labels(
+            datasets[k], f'y_{k}', OUTPUT_DATA_PATH, sampling_period=labels_sampling_period,
+            pre_sampling_period=args.pre_sampling_period
+        )
+
     # resample periods before doing anything if specified and relevant
-    downsampling = (args.sampling_period != args.pre_sampling_period)
-    if downsampling and args.downsampling_position == 'first':
+    data_downsampling = args.data_sampling_period != args.pre_sampling_period
+    downsampling_pos = {
+        p: data_downsampling and args.data_downsampling_position == p
+        for p in CHOICES['build_features']['data_downsampling_position']
+    }
+    if downsampling_pos['first']:
         for k in datasets:
-            datasets[k] = get_resampled(datasets[k], args.sampling_period, anomaly_col=True)
+            datasets[k] = get_resampled(
+                datasets[k], args.data_sampling_period, anomaly_col=False,
+                pre_sampling_period=args.pre_sampling_period
+            )
     # optional features alteration bundle
     if args.alter_bundles != '.':
         print(f'altering features using bundle #{args.alter_bundle_idx} of {args.alter_bundles}')
         datasets = get_altered_features(datasets, get_bundles_lists()[args.alter_bundles][args.alter_bundle_idx])
 
     # resample periods after alteration but before transformation if specified and relevant
-    if downsampling and args.downsampling_position == 'middle':
+    if downsampling_pos['middle']:
         for k in datasets:
-            datasets[k] = get_resampled(datasets[k], args.sampling_period, anomaly_col=True)
-
-    # turn `Anomaly` columns to `(n_periods, period_size,)` ndarrays, dropping them from the DataFrames
-    # (`period_size` can depend on the period)
-    os.makedirs(OUTPUT_DATA_PATH, exist_ok=True)
-    # downsample the labels before saving them if downsampling should be applied at the end
-    end_downsampling = (downsampling and args.downsampling_position == 'last')
-    sampling_period = args.sampling_period if end_downsampling else None
-    print(f'{"downsampling and " if end_downsampling else ""}saving labels to {OUTPUT_DATA_PATH}')
-    for k in datasets:
-        datasets[k] = extract_save_labels(
-            datasets[k], f'y_{k}', OUTPUT_DATA_PATH,
-            sampling_period=sampling_period, pre_sampling_period=args.pre_sampling_period
-        )
+            datasets[k] = get_resampled(
+                datasets[k], args.data_sampling_period, anomaly_col=False,
+                pre_sampling_period=args.pre_sampling_period
+            )
 
     # turn datasets to `(n_periods, period_size, n_features)` ndarrays
     print('converting datasets to numpy arrays...', end=' ', flush=True)
@@ -83,13 +91,14 @@ if __name__ == '__main__':
         datasets = transformer.fit_transform_datasets(datasets, datasets_info)
         print('done.')
 
-    # resample periods of all datasets according to the downsampling position if relevant
-    if end_downsampling:
+    # resample periods after every transformations if specified and relevant
+    if downsampling_pos['last']:
         for k in datasets:
             datasets[k] = get_numpy_from_dfs(
                 get_resampled(
                     get_dfs_from_numpy(datasets[k], args.pre_sampling_period),
-                    args.sampling_period, anomaly_col=False
+                    args.data_sampling_period, anomaly_col=False,
+                    pre_sampling_period=args.pre_sampling_period
                 )
             )
 

@@ -37,8 +37,9 @@ ARGS = {
     # features alteration and transformation arguments
     'alter_bundles': 'spark_bundles',
     'alter_bundle_idx': 0,
-    'sampling_period': '15s',
-    'downsampling_position': 'first',
+    'data_sampling_period': '15s',
+    'data_downsampling_position': 'last',
+    'labels_sampling_period': '15s',
     'transform_chain': 'trace_scaling',
     'head_size': 240,
     'online_window_type': 'expanding',
