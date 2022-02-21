@@ -36,7 +36,7 @@ if __name__ == '__main__':
 
     # load the model and scoring classes for the relevant type of task
     task_type, model_classes = get_modeling_task_and_classes(args)
-    scoring_classes = importlib.import_module(f'scoring.{task_type}.scorers').scoring_classes
+    scoring_classes = importlib.import_module(f'scoring.{task_type}.{task_type}_scorers').scoring_classes
 
     if task_type == 'forecasting':
         # adapt labels to the task cutting out the first `n_back` records of each period

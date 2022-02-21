@@ -7,8 +7,8 @@ import numpy as np
 import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
-from scoring.forecasting.scorers import ForecastingScorer
-from scoring.reconstruction.scorers import ReconstructionScorer
+from scoring.forecasting.forecasting_scorers import ForecastingScorer
+from scoring.reconstruction.reconstruction_scorers import ReconstructionScorer
 from detection.helpers import threshold_scores
 from detection.threshold_selectors import selector_classes
 

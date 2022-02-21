@@ -50,7 +50,7 @@ if __name__ == '__main__':
     task_type, model_classes = get_modeling_task_and_classes(args)
     a_t = 'the type of task must be either `forecasting` or `reconstruction`'
     assert task_type in ['forecasting', 'reconstruction'], a_t
-    scoring_classes = importlib.import_module(f'scoring.{task_type}.scorers').scoring_classes
+    scoring_classes = importlib.import_module(f'scoring.{task_type}.{task_type}_scorers').scoring_classes
 
     # non-parametric models are simply initialized without loading anything
     if args.model_type == 'naive.forecasting':

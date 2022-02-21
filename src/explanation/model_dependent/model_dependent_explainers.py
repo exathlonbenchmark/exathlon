@@ -7,8 +7,8 @@ from abc import abstractmethod
 import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
-from scoring.forecasting.scorers import ForecastingScorer
-from scoring.reconstruction.scorers import ReconstructionScorer
+from scoring.forecasting.forecasting_scorers import ForecastingScorer
+from scoring.reconstruction.reconstruction_scorers import ReconstructionScorer
 from explanation.explainers import Explainer
 
 
@@ -30,9 +30,9 @@ class ModelDependentExplainer(Explainer):
         a_t = 'supported AD models to explain only include forecasting or reconstruction scorers'
         assert isinstance(ad_model, ForecastingScorer) or isinstance(ad_model, ReconstructionScorer), a_t
         if isinstance(ad_model, ForecastingScorer):
-            self.sample_length = ad_model.forecaster.n_back + ad_model.forecaster.n_forward
+            self.sample_length = ad_model.normality_model.n_back + ad_model.normality_model.n_forward
         else:
-            self.sample_length = ad_model.reconstructor.window_size
+            self.sample_length = ad_model.normality_model.window_size
         # prediction (i.e., outlier scoring) function of the AD model to explain
         self.ad_scoring_func = ad_model.score_windows
 
