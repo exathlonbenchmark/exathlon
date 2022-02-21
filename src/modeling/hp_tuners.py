@@ -80,27 +80,29 @@ class BayesianTuner(BayesianOptimization):
         """
         # call the base behavior of the hook
         super().on_trial_end(trial)
-        # load the best model corresponding to the trial's run
-        trial_model = self.load_model(trial)
-        # save model to the main path (one per hp set) and a backup path (one per run)
-        hp_root = self.normality_modeler.output_path
-        run_root = os.path.join(hp_root, time.strftime('%Y_%m_%d-%H_%M_%S'))
-        for root_path in [hp_root, run_root]:
-            print(f'saving best trial model to {root_path}...', end=' ', flush=True)
-            os.makedirs(root_path, exist_ok=True)
-            trial_model.save(os.path.join(root_path, 'model.h5'))
-            print('done.')
+        # only load and save the best model for the run if the loss did not end up as NaN
+        if trial.best_step is not None:
+            # load the best model corresponding to the trial's run
+            trial_model = self.load_model(trial)
+            # save model to the main path (one per hp set) and a backup path (one per run)
+            hp_root = self.normality_modeler.output_path
+            run_root = os.path.join(hp_root, time.strftime('%Y_%m_%d-%H_%M_%S'))
+            for root_path in [hp_root, run_root]:
+                print(f'saving best trial model to {root_path}...', end=' ', flush=True)
+                os.makedirs(root_path, exist_ok=True)
+                trial_model.save(os.path.join(root_path, 'model.h5'))
+                print('done.')
 
-        # save model's training, validation and test performance for comparison
-        args = self.normality_modeler.args
-        a_t = 'model type must be a supported forecasting or reconstruction-based method'
-        assert args.model_type in CHOICES['train_model']['forecasting'] + \
-               CHOICES['train_model']['reconstruction'], a_t
-        modeling_task = get_args_string(args, 'modeling_task')
-        config_name = get_args_string(args, 'model') + f'_{time.strftime("run.%Y.%m.%d.%H.%M.%S")}'
-        print(f'saving model performance to {self.comparison_path} at index {config_name}')
-        # set the trial's model as the model used by the normality modeler
-        self.normality_modeler.model = trial_model
-        f = save_forecasting_evaluation if args.model_type in CHOICES['train_model']['forecasting'] \
-            else save_reconstruction_evaluation
-        f(self.data, self.normality_modeler, modeling_task, config_name, self.comparison_path)
+            # save model's training, validation and test performance for comparison
+            args = self.normality_modeler.args
+            a_t = 'model type must be a supported forecasting or reconstruction-based method'
+            assert args.model_type in CHOICES['train_model']['forecasting'] + \
+                   CHOICES['train_model']['reconstruction'], a_t
+            modeling_task = get_args_string(args, 'modeling_task')
+            config_name = get_args_string(args, 'model') + f'_{time.strftime("run.%Y.%m.%d.%H.%M.%S")}'
+            print(f'saving model performance to {self.comparison_path} at index {config_name}')
+            # set the trial's model as the model used by the normality modeler
+            self.normality_modeler.model = trial_model
+            f = save_forecasting_evaluation if args.model_type in CHOICES['train_model']['forecasting'] \
+                else save_reconstruction_evaluation
+            f(self.data, self.normality_modeler, modeling_task, config_name, self.comparison_path)

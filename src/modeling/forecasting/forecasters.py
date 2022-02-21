@@ -7,8 +7,8 @@ from abc import abstractmethod
 
 import numpy as np
 
-from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint, EarlyStopping
 from tensorflow.keras.models import load_model
+from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint, EarlyStopping, TerminateOnNaN
 
 # add absolute src directory to python path to import other project modules
 import sys
@@ -225,6 +225,8 @@ class RNN(Forecaster, HyperModel if KT_AVAILABLE else object):
         early_stopping = EarlyStopping(
             monitor='val_loss', patience=10, mode='min', restore_best_weights=True
         )
+        # we add a `TerminateOnNaN` callback for hyperparameters tuning to skip bad configurations
+        terminate_on_nan = TerminateOnNaN()
         tuner = BayesianTuner(
             self,
             data=data,
@@ -241,7 +243,7 @@ class RNN(Forecaster, HyperModel if KT_AVAILABLE else object):
         n_epochs, batch_size = self.train_hp['n_epochs'], self.train_hp['batch_size']
         tuner.search(
             X_train, y_train, epochs=n_epochs, batch_size=batch_size, verbose=1,
-            validation_data=(X_val, y_val), callbacks=[tensorboard, early_stopping]
+            validation_data=(X_val, y_val), callbacks=[tensorboard, early_stopping, terminate_on_nan]
         )
 
     def fit(self, X_train, y_train, X_val, y_val):
