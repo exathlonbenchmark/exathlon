@@ -4,15 +4,135 @@ Gathers functions for visualizing periods represented as ndarrays.
 """
 import os
 import argparse
+import importlib
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 # add absolute src directory to python path to import other project modules
 import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
+from metrics.ad_evaluators import extract_multiclass_ranges_ids
 from detection.threshold_selectors import IQRSelector
+
+
+def period_wise_figure(plot_func, periods, periods_labels=None, periods_info=None, fig_title=None,
+                       full_output_path=None, used_data=None, **func_args):
+    """Plots period-wise items within the same figure using the provided plotting function for each axis.
+
+    Args:
+        plot_func (func): plotting function to call for each period in the figure.
+        periods (ndarray): period-wise arrays.
+        periods_labels (ndarray|None): optional periods labels.
+        periods_info (ndarray|None): optional periods information.
+        fig_title (str|None): optional figure title.
+        full_output_path (str|None): optional output path to save the figure to (including file name and extension).
+        used_data (str|None): used data (if relevant, used to derive a period's title from its information).
+        **func_args: optional keyword arguments to pass to the plotting function.
+    """
+    # create and setup new figure
+    n_periods, fontsizes = periods.shape[0], {'title': 25}
+    fig, axs = plt.subplots(n_periods, 1, sharex='none')
+    fig.set_size_inches(20, 5 * n_periods)
+    if fig_title is not None:
+        fig.suptitle(fig_title, fontsize=fontsizes['title'], fontweight='bold')
+
+    # define axes, period labels and period titles to loop through
+    if n_periods == 1:
+        axs = [axs]
+    looped = dict()
+    for k, items in zip(['labels', 'title'], [periods_labels, periods_info]):
+        if items is None:
+            looped[k] = np.repeat(None, n_periods)
+        elif k == 'labels' or used_data is None:
+            looped[k] = items
+        else:
+            get_title = importlib.import_module(f'visualization.helpers.{used_data}').get_period_title_from_info
+            looped[k] = [get_title(info) for info in items]
+
+    # call the plotting function for each period separately
+    for i, ax in enumerate(axs):
+        plot_func(
+            periods[i], period_labels=looped['labels'][i], period_title=looped['title'][i], ax=ax, **func_args
+        )
+
+    # save the figure as an image if an output path was provided
+    if full_output_path is not None:
+        print(f'saving period-wise figure to {full_output_path}...', end=' ', flush=True)
+        os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
+        fig.savefig(full_output_path)
+        plt.close()
+        print('done.')
+
+
+def plot_period_scores(period_scores, period_labels=None, period_title=None, *, ax=None, color='darkgreen'):
+    """Plots the provided period outlier scores through time, highlighting anomalous ranges if specified and any.
+
+    Args:
+        period_scores (ndarray): 1d-array of outlier scores to plot.
+        period_labels (ndarray|None): optional multiclass labels for the period's records.
+        period_title (list|None): optional title to use for the period.
+        ax (AxesSubplot|None): optional plt.axis to plot the scores on if not in a standalone figure.
+        color (str): color to use for the curve of outlier scores.
+
+    Returns:
+        AxesSubplot: the axis the period was plotted on, to enable further usage.
+    """
+    # setup font sizes and title
+    fontsizes = {'title': 25, 'axes': 25, 'legend': 25, 'ticks': 22}
+    title = period_title if period_title is not None else 'Outlier Scores'
+
+    # create standalone figure if needed and setup axis
+    if ax is None:
+        plt.figure(figsize=(20, 5))
+        ax = plt.axes()
+    ax.set_title(title, fontsize=fontsizes['title'], y=1.07)
+    ax.set_xlabel('Time Index', fontsize=fontsizes['axes'])
+    ax.set_ylabel('Outlier Score', fontsize=fontsizes['axes'])
+    ax.tick_params(axis='both', which='major', labelsize=fontsizes['ticks'])
+    ax.tick_params(axis='both', which='minor', labelsize=fontsizes['ticks'])
+
+    # plot the period outlier scores
+    ax.plot(period_scores, color=color)
+
+    # highlight the anomalous ranges of the period if any
+    if period_labels is not None:
+        plot_period_anomalies(ax, period_labels)
+
+    # remove duplicate labels for the legend
+    handles, labels = ax.get_legend_handles_labels()
+    label_dict = dict(zip(labels, handles))
+    if len(label_dict) > 0:
+        # show that anomalous ranges are represented as rectangles in the legend (color = red with alpha 0.05)
+        red_patch = mpatches.Patch(facecolor='#FFF2F2', edgecolor='red', linewidth=1)
+        ax.legend(
+            handles=[red_patch], labels=label_dict.keys(),
+            loc='upper left', prop={'size': fontsizes['legend']}
+        )
+    ax.grid()
+    return ax
+
+
+def plot_period_anomalies(ax, period_labels):
+    """Plots any anomalous range(s) within a period on `ax` based on `periods_labels`.
+
+    Args:
+        ax (AxesSubplot): plt.axis on which to plot the anomalous ranges.
+        period_labels (ndarray): 1d-array of multiclass labels for the period.
+    """
+    # extract contiguous ranges from the record-wise labels
+    ranges_ids_dict = extract_multiclass_ranges_ids(period_labels)
+    # plot anomalous ranges by type
+    for class_label in ranges_ids_dict:
+        anomalous_ranges = ranges_ids_dict[class_label]
+        for range_ in anomalous_ranges:
+            # end of the range is exclusive
+            beg, end = (range_[0], range_[1] - 1)
+            ax.axvspan(beg, end, color='r', alpha=0.05)
+            for range_idx in [beg, end]:
+                ax.axvline(range_idx, label='Real Anomaly Range', color='r')
 
 
 def plot_scores_distributions(periods_scores, periods_labels, restricted_types=None, fig_title=None,

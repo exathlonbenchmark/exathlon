@@ -16,3 +16,8 @@ ANOMALY_COLORS = {type_: dark2_palette[i] for i, type_ in enumerate(ANOMALY_TYPE
 
 # colors used for reporting performance globally and per anomaly type
 METRICS_COLORS = dict({'global': 'blue'}, **ANOMALY_COLORS)
+
+
+def get_period_title_from_info(period_info):
+    """Returns the title to use to describe a specific period's plot from its information."""
+    return f'{period_info[0]} ({period_info[1].title().replace("_", " ").replace("Cpu", "CPU")})'

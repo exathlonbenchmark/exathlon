@@ -23,7 +23,7 @@ from data.helpers import get_matching_sampling
 from metrics.ad_evaluators import get_auc
 from visualization.evaluation import plot_pr_curves
 from visualization.functions import plot_curves
-from visualization.periods.array import plot_scores_distributions
+from visualization.periods.array import plot_scores_distributions, period_wise_figure, plot_period_scores
 
 
 def get_metric_names_dict(evaluation_step, anomaly_types=None, *, beta=None):
@@ -196,16 +196,17 @@ def save_evaluation(evaluation_step, data_dict, evaluator, evaluation_string, co
 
         # add metrics when considering all traces and applications the same
         print('computing metrics "globally".')
+        periods_info = data_dict[f'{n}_info']
         evaluation_df.loc[(config_name, 'global'), :] = get_metrics_row(
             periods_labels, periods_preds, evaluator, column_names, metric_names_dict,
             anomaly_types, granularity='global', method_path=method_path,
-            evaluation_string=evaluation_string, metrics_colors=metrics_colors
+            evaluation_string=evaluation_string, metrics_colors=metrics_colors,
+            periods_info=periods_info, used_data=used_data
         )
 
         # if using spark data, add metrics for each application and trace
         if used_data == 'spark':
             # application-wise performance
-            periods_info = data_dict[f'{n}_info']
             app_ids = set([get_app_from_name(info[0]) for info in periods_info])
             for app_id in app_ids:
                 app_indices = [i for i, info in enumerate(periods_info) if get_app_from_name(info[0]) == app_id]
@@ -219,7 +220,8 @@ def save_evaluation(evaluation_step, data_dict, evaluator, evaluation_string, co
                 evaluation_df.loc[(config_name, f'app{app_id}'), :] = get_metrics_row(
                     app_labels, app_preds, evaluator, column_names, metric_names_dict,
                     anomaly_types, granularity='app', metrics_colors=metrics_colors,
-                    method_path=method_path, periods_key=f'app{app_id}'
+                    method_path=method_path, periods_key=f'app{app_id}',
+                    periods_info=app_info, used_data=used_data
                 )
                 # trace-wise performance
                 trace_names = set([info[0] for info in app_info])
@@ -234,7 +236,8 @@ def save_evaluation(evaluation_step, data_dict, evaluator, evaluation_string, co
                     print(f'computing metrics for trace {trace_name}.')
                     evaluation_df.loc[(config_name, trace_info[0][0]), :] = get_metrics_row(
                         trace_labels, trace_preds, evaluator, column_names, metric_names_dict,
-                        anomaly_types, granularity='trace', method_path=method_path, periods_key=trace_name
+                        anomaly_types, granularity='trace', method_path=method_path,
+                        periods_key=trace_name, periods_info=trace_info, used_data=used_data
                     )
                 # average performance across traces (in-trace separation ability)
                 trace_rows = evaluation_df.loc[~(
@@ -265,7 +268,7 @@ def save_evaluation(evaluation_step, data_dict, evaluator, evaluation_string, co
 
 def get_scoring_metrics_row(labels, scores, evaluator, column_names, metric_names_dict,
                             anomaly_types, granularity, method_path=None, evaluation_string=None,
-                            metrics_colors=None, periods_key=None):
+                            metrics_colors=None, periods_key=None, periods_info=None, used_data=None):
     """Returns the metrics row to add to a scoring evaluation DataFrame.
 
     Note: the column names do not determine the metrics that will be computed by the function
@@ -287,6 +290,8 @@ def get_scoring_metrics_row(labels, scores, evaluator, column_names, metric_name
             for each anomaly type if dict (the keys must then belong to `anomaly_types`).
         periods_key (str|None): if granularity is not `global`, name to use to identify the periods.
             Has to be of the form `appX` if `app` granularity or `trace_name` if `trace` granularity.
+        periods_info (list|None): optional list of periods information.
+        used_data (str|None): used data, if relevant.
 
     Returns:
         list: list of metrics to add to the evaluation DataFrame (corresponding to `column_names`).
@@ -346,33 +351,41 @@ def get_scoring_metrics_row(labels, scores, evaluator, column_names, metric_name
             anomaly_types=anomaly_types,
             full_output_path=full_output_path
         )
-
-    if granularity == 'global':
-        # save the full PR curve(s) under the method path
-        full_output_path = os.path.join(method_path, f'{evaluation_string}_{set_name}_pr_curve.png')
-        plot_pr_curves(
-            r, p, pr_ts,
-            fig_title=f'Precision-Recall Curve(s) on the {set_title} Set',
-            colors=metrics_colors,
-            full_output_path=full_output_path
-        )
-        # save the F-score curve(s) under the method path
-        full_output_path = os.path.join(method_path, f'{evaluation_string}_{set_name}_f{evaluator.beta}_curve.png')
-        plot_curves(
-            pr_ts, f,
-            fig_title=f'F{evaluator.beta}-Score(s) on the {set_title} Set',
-            xlabel='Threshold',
-            ylabel=f'F{evaluator.beta}-Score',
-            colors=metrics_colors,
-            show_max_values=True,
-            full_output_path=full_output_path
-        )
+        if granularity == 'global':
+            # save the evolution of outlier scores through time within each period
+            full_output_path = os.path.join(method_path, f'{set_name}_scores.png')
+            period_wise_figure(
+                plot_period_scores, scores, labels,
+                periods_info=periods_info,
+                used_data=used_data,
+                fig_title=f'{set_title} Periods Scores',
+                full_output_path=full_output_path
+            )
+            # save the full PR curve(s) under the method path
+            full_output_path = os.path.join(method_path, f'{evaluation_string}_{set_name}_pr_curve.png')
+            plot_pr_curves(
+                r, p, pr_ts,
+                fig_title=f'Precision-Recall Curve(s) on the {set_title} Set',
+                colors=metrics_colors,
+                full_output_path=full_output_path
+            )
+            # save the F-score curve(s) under the method path
+            full_output_path = os.path.join(method_path, f'{evaluation_string}_{set_name}_f{evaluator.beta}_curve.png')
+            plot_curves(
+                pr_ts, f,
+                fig_title=f'F{evaluator.beta}-Score(s) on the {set_title} Set',
+                xlabel='Threshold',
+                ylabel=f'F{evaluator.beta}-Score',
+                colors=metrics_colors,
+                show_max_values=True,
+                full_output_path=full_output_path
+            )
     return metrics_row.iloc[0].tolist()
 
 
 def get_detection_metrics_row(labels, preds, evaluator, column_names, metric_names_dict,
                               anomaly_types, granularity, method_path=None, evaluation_string=None,
-                              metrics_colors=None, periods_key=None):
+                              metrics_colors=None, periods_key=None, periods_info=None, used_data=None):
     """Returns the metrics row to add to a detection evaluation DataFrame.
 
     Args:
@@ -391,6 +404,8 @@ def get_detection_metrics_row(labels, preds, evaluator, column_names, metric_nam
             for each anomaly type if dict (the keys must then belong to `anomaly_types`).
         periods_key (str|None): if granularity is not `global`, name to use to identify the periods.
             Has to be of the form `appX` if `app` granularity or `trace_name` if `trace` granularity.
+        periods_info (list|None): optional list of periods information.
+        used_data (str|None): used data, if relevant.
 
     Returns:
         list: list of metrics to add to the evaluation DataFrame (corresponding to `column_names`).
@@ -434,7 +449,7 @@ def get_detection_metrics_row(labels, preds, evaluator, column_names, metric_nam
 
 def get_explanation_metrics_row(labels, periods, evaluator, column_names, metric_names_dict,
                                 anomaly_types, granularity, method_path=None, evaluation_string=None,
-                                metrics_colors=None, periods_key=None):
+                                metrics_colors=None, periods_key=None, periods_info=None, used_data=None):
     """Returns the metrics row to add to an explanation evaluation DataFrame.
 
     Args:
@@ -453,6 +468,8 @@ def get_explanation_metrics_row(labels, periods, evaluator, column_names, metric
             for each anomaly type if dict (the keys must then belong to `anomaly_types`).
         periods_key (str|None): if granularity is not `global`, name to use to identify the periods.
             Has to be of the form `appX` if `app` granularity or `trace_name` if `trace` granularity.
+        periods_info (list|None): optional list of periods information.
+        used_data (str|None): used data, if relevant.
 
     Returns:
         list: list of metrics to add to the evaluation DataFrame (corresponding to `column_names`).
