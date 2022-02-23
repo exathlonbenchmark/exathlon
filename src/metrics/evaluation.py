@@ -9,6 +9,7 @@ Gathers "scoring", "detection" and "explanation" evaluations:
     and stable explanations, potentially with high predictive power.
 """
 import os
+import json
 import importlib
 
 import numpy as np
@@ -19,7 +20,7 @@ import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
 from utils.spark import get_app_from_name
-from data.helpers import get_matching_sampling
+from data.helpers import get_matching_sampling, NumpyJSONEncoder
 from metrics.ad_evaluators import get_auc
 from visualization.evaluation import plot_pr_curves
 from visualization.functions import plot_curves
@@ -483,8 +484,20 @@ def get_explanation_metrics_row(labels, periods, evaluator, column_names, metric
     # recover the dataset prefix from the column names
     set_prefix = f'{column_names[0].split("_")[0]}_'
 
-    # compute the metrics defined by the evaluator
-    metrics_dict = evaluator.compute_metrics(periods, labels, include_ed2=(anomaly_types is not None))
+    # compute the metrics defined by the evaluator and get the instances explanations
+    metrics_dict, explanations_dict = evaluator.compute_metrics(
+        periods, labels, periods_info, used_data, include_ed2=(anomaly_types is not None)
+    )
+    if granularity == 'global':
+        # save the instances explanations as a JSON file
+        print(f'saving instances explanations to {method_path}...', end=' ', flush=True)
+        os.makedirs(method_path, exist_ok=True)
+        with open(os.path.join(method_path, 'explanations.json'), 'w') as json_file:
+            json.dump(
+                explanations_dict, json_file, separators=(',', ':'), sort_keys=True, indent=4,
+                cls=NumpyJSONEncoder
+            )
+        print('done.')
 
     # we do not use average metrics across types here (ED1 conciseness is only returned globally)
     only_global_metric = 'ed1_conciseness'

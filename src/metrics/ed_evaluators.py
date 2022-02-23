@@ -82,24 +82,31 @@ class EDEvaluator:
             'accuracy': self.compute_ed1_accuracy
         }
 
-    def compute_metrics(self, periods, periods_labels, include_ed2=True):
-        """Returns the relevant ED metrics for the provided `periods` and `periods_labels`.
+    def compute_metrics(self, periods, periods_labels, periods_info, used_data, include_ed2=True):
+        """Returns the relevant ED metrics and explanations for the provided `periods` and `periods_labels`.
 
         Metrics are returned as a single dictionary with as keys the metric names and as
         values the metric values, as described in the class documentation.
+
+        Explanations are returned as a single dictionary whose format depends on the used data.
+        For spark data, explanations are grouped by file name, and labeled as
+        `{instance_idx}_T{instance_type}`, where `instance_idx` is the chronological rank of the
+        corresponding instance in the file, and `instance_type` is its numerical anomaly type.
 
         Args:
             periods (ndarray): periods data of shape `(n_periods, period_length, n_features)`.
                 With `period_length` depending on the period.
             periods_labels (ndarray): labels for each period of shape `(n_periods, period_length)`.
                 With `period_length` depending on the period.
+            periods_info (list): list of periods information.
+            used_data (str): used data, used to interpret the periods information.
             include_ed2 (bool): whether to include ED2 metrics in the computation. We might
                 want to ignore those metrics when anomaly types are unknown.
 
         Returns:
-            dict: relevant ED metrics at keys `prop_covered`, `prop_explained`, `time` and `ed{i}_{name}`;
+            dict, dict: relevant ED metrics at keys `prop_covered`, `prop_explained`, `time` and `ed{i}_{name}`;
                 with `i` either 1 or 2 and `name` in {"conciseness", "norm_consistency", "precision",
-                "recall", "f1_score"}.
+                "recall", "f1_score"}, along with instances explanations.
         """
         # ED metrics initialization
         shared_m_names = ['prop_covered', 'prop_explained', 'time']
@@ -117,9 +124,9 @@ class EDEvaluator:
 
         # instances explanations per anomaly type
         explanations_dict = dict()
-        # evaluation instances and corresponding labels per anomaly type
-        instances_dict, instances_labels_dict, ed_metrics['prop_covered'] = \
-            self.get_evaluation_instances(periods, periods_labels)
+        # evaluation instances, with corresponding labels and information per anomaly type
+        instances_dict, instances_labels_dict, instances_info_dict, ed_metrics['prop_covered'] = \
+            self.get_evaluation_instances(periods, periods_labels, periods_info)
 
         for type_, type_instances in instances_dict.items():
             print(f'computing metrics for instances of type {type_}...', end=' ', flush=True)
@@ -212,34 +219,59 @@ class EDEvaluator:
         if not include_ed2:
             # remove ED2 conciseness (only used to computed ED1 conciseness)
             return {k: v for k, v in ed_metrics.items() if 'ed2_conciseness' not in k}
-        return ed_metrics
 
-    def get_evaluation_instances(self, periods, periods_labels):
-        """Returns evaluation instances and labels from the provided `periods` and `periods_labels`.
+        # format type-wise explanations to include the instances information
+        formatted_explanations_dict = dict()
+        for type_ in explanations_dict:
+            for i in range(len(explanations_dict[type_])):
+                explanation, instance_info = explanations_dict[type_][i], instances_info_dict[type_][i]
+                # the chronological rank of the instance in the period is always last
+                instance_idx = instance_info[-1]
+                if used_data == 'spark':
+                    # for spark data, the first element of the period information is the file name
+                    file_name = instance_info[0]
+                    # group explanations by file name
+                    if file_name not in formatted_explanations_dict:
+                        formatted_explanations_dict[file_name] = dict()
+                    # within a file, label each explanation with its instance rank and type
+                    formatted_explanations_dict[file_name][f'{instance_idx}_T{type_}'] = explanation
+
+        # return ED metrics and formatted explanations
+        return ed_metrics, formatted_explanations_dict
+
+    def get_evaluation_instances(self, periods, periods_labels, periods_info):
+        """Returns evaluation instances, labels and information from the provided `periods`, `periods_labels`
+            and `periods_info`.
 
         Raises `NoInstanceError` if no evaluation instance could be extracted from the
         provided data. Else, provides along with the instances and labels the proportion
         of anomalies that will be covered in the evaluation (grouped by type).
+
+        Instances information is returned as lists of the form `[*period_info, instance_idx]`, where
+        `period_info` is the information of the period the instance belongs to, and `instance_idx` is
+        the chronological rank of the instance in that period.
 
         Args:
             periods (ndarray): periods records of shape `(n_periods, period_length, n_features)`.
                 With `period_length` depending on the period.
             periods_labels (ndarray): multiclass periods labels of shape `(n_periods, period_length)`.
                 With `period_length` depending on the period.
+            periods_info (list): list of periods information.
 
         Returns:
-            dict, dict, dict: instances, corresponding labels and proportions of anomalies covered per
-                anomaly type, with as keys the relevant (numerical) anomaly types and as values
-                ndarrays/floats.
+            dict, dict, dict, dict: instances, corresponding labels and information, as well as proportions
+                of anomalies covered per anomaly type, with as keys the relevant (numerical) anomaly types and
+                as values ndarrays/lists/floats.
         """
         pos_classes = np.delete(np.unique(np.concatenate(periods_labels, axis=0)), 0)
         n_ranges_dict, prop_covered_dict = dict(), dict()
-        instances_dict, instances_labels_dict = dict(), dict()
+        instances_dict, instances_labels_dict, instances_info_dict = dict(), dict(), dict()
         for pc in pos_classes:
-            n_ranges_dict[pc], instances_dict[pc], instances_labels_dict[pc] = 0, [], []
+            n_ranges_dict[pc] = 0
+            instances_dict[pc], instances_labels_dict[pc], instances_info_dict[pc] = [], [], []
 
-        for period, period_labels in zip(periods, periods_labels):
-            # instances and instance labels grouped by anomaly type for the period
+        for period, period_labels, period_info in zip(periods, periods_labels, periods_info):
+            # instances, labels and information grouped by anomaly type for the period
             period_pos_ranges = extract_binary_ranges_ids((period_labels > 0).astype(int))
             period_range_classes = np.array([period_labels[pos_range[0]] for pos_range in period_pos_ranges])
             for range_idx in range(len(period_pos_ranges)):
@@ -251,7 +283,8 @@ class EDEvaluator:
                 if instance is not None:
                     instances_dict[range_class].append(instance)
                     instances_labels_dict[range_class].append(instance_labels)
-        # turn lists to numpy arrays and return the results
+                    instances_info_dict[range_class].append([*period_info, range_idx])
+        # turn data and labels lists to numpy arrays and return the results
         for pc in instances_dict:
             instances_dict[pc] = get_numpy_from_numpy_list(instances_dict[pc])
             instances_labels_dict[pc] = get_numpy_from_numpy_list(instances_labels_dict[pc])
@@ -260,7 +293,7 @@ class EDEvaluator:
         # raise error if no evaluation instance could be extracted
         if np.all([prop_covered == 0 for prop_covered in prop_covered_dict.values()]):
             raise NoInstanceError('No evaluation instance could be extracted from the periods.')
-        return instances_dict, instances_labels_dict, prop_covered_dict
+        return instances_dict, instances_labels_dict, instances_info_dict, prop_covered_dict
 
     @abstractmethod
     def get_evaluation_instance(self, period, period_labels, pos_ranges, range_idx):

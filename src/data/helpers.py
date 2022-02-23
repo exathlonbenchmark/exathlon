@@ -10,6 +10,18 @@ import numpy as np
 import pandas as pd
 
 
+class NumpyJSONEncoder(json.JSONEncoder):
+    """JSON encoder used to serialize numpy ndarrays."""
+    def default(self, o):
+        if isinstance(o, np.integer):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        return super(NumpyJSONEncoder, self).default(o)
+
+
 def is_string_type(str_, type_=float):
     """Returns True if `str_` can be converted to type `type_`, False otherwise.
 
