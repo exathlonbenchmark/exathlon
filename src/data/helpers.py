@@ -384,7 +384,8 @@ def get_upsampled(array, target_length):
     upsampled = np.repeat(array, repetition_factor)
     length_diff = target_length - len(upsampled)
     if length_diff >= 0:
-        upsampled = np.concatenate([upsampled, [upsampled[-1] for _ in range(length_diff)]])
+        # type conversion needed in case concatenated list is empty (i.e., length difference is zero)
+        upsampled = np.concatenate([upsampled, [upsampled[-1] for _ in range(length_diff)]]).astype(array.dtype)
     else:
         # `length_diff` is negative here
         upsampled = upsampled[:length_diff]
