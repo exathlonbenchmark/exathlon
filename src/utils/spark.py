@@ -69,6 +69,9 @@ PIPELINE_DEFAULT_ARGS = {
     'fa_training': 'all.training',
 
     # normality modeling arguments
+    'modeling_n_periods': -1,
+    'modeling_data_prop': 1.0,
+    'modeling_data_seed': 21,
     'modeling_split': 'stratified.split',
     'modeling_split_seed': 21,
     'n_period_strata': 3,

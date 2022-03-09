@@ -11,7 +11,7 @@ import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
 from utils.common import MODELING_SET_NAMES, CHOICES
-from data.helpers import get_aligned_shuffle, get_sliding_windows
+from data.helpers import save_files, get_aligned_shuffle, get_sliding_windows
 from modeling.forecasting.helpers import get_period_sequence_target_pairs
 
 
@@ -46,10 +46,16 @@ class DataSplitter:
     def __init__(self, args, output_path=None):
         self.model_type = args.model_type
         self.output_path = output_path
+        # number of periods to set as input normal data (first largest, then selected at random)
+        self.modeling_n_periods = args.modeling_n_periods
+        # proportion of input normal data to consider when constituting the modeling datasets
+        self.modeling_data_prop = args.modeling_data_prop
         # proportion of samples taken as the validation and test sets
         self.val_prop = args.modeling_val_prop
         self.test_prop = args.modeling_test_prop
-        self.random_seed = args.modeling_split_seed
+        # data selection and splitting random seeds
+        self.data_random_seed = args.modeling_data_seed
+        self.split_random_seed = args.modeling_split_seed
 
     def get_modeling_split(self, periods, periods_info, **sampling_args):
         """Returns the final shuffled train/val/test samples for the modeling task.
@@ -65,15 +71,45 @@ class DataSplitter:
         Returns:
             dict: datasets as `{(X|y)_(train|val|test): value}`, with `value` ndarray of samples/targets.
         """
-        # fix random seeds for reproducibility across calls
-        random.seed(self.random_seed)
-        np.random.seed(self.random_seed)
+        # fix data selection random seeds for reproducibility across calls
+        random.seed(self.data_random_seed)
+        np.random.seed(self.data_random_seed)
 
         # set the sampling function and the presence of targets according to the model type
         sampling_f, are_targets = get_sampling_f_and_targets_presence(self.model_type)
 
-        # return the constituted datasets
-        return self.custom_modeling_split(periods, periods_info, are_targets, sampling_f, **sampling_args)
+        # only consider the provided number of periods if specified
+        sampled_periods, sampled_info = periods, periods_info
+        if self.modeling_n_periods != -1:
+            # the first selected period is always the largest one
+            largest_idx = np.argmax([p.shape[0] for p in periods])
+            period_ids = [largest_idx]
+            # the remaining periods, if any, are randomly sampled
+            if self.modeling_n_periods > 1:
+                period_ids += random.sample(
+                    [i for i in range(len(periods)) if i != largest_idx], self.modeling_n_periods - 1
+                )
+            sampled_periods = periods[period_ids]
+            sampled_info = [v for i, v in enumerate(periods_info) if i in period_ids]
+            # save the selected periods information
+            if self.output_path is not None:
+                print(f'saving {self.modeling_n_periods} selected periods information...', end=' ', flush=True)
+                saved_dict = {
+                    'period_ids': [int(id_) for id_ in period_ids],
+                    'data_prop': sum([p.shape[0] for p in sampled_periods]) / sum([p.shape[0] for p in periods])
+                }
+                save_files(self.output_path, {'selected_periods_info': saved_dict}, 'json')
+                print('done.')
+
+        # fix data splitting random seeds for reproducibility across calls and data selection seeds
+        random.seed(self.data_random_seed)
+        np.random.seed(self.data_random_seed)
+
+        # perform data splitting
+        data = self.custom_modeling_split(sampled_periods, sampled_info, are_targets, sampling_f, **sampling_args)
+
+        # return only the specified proportion of each dataset if relevant
+        return {k: v[:int(self.modeling_data_prop * v.shape[0])] for k, v in data.items()}
 
     @abstractmethod
     def custom_modeling_split(self, periods, periods_info, are_targets, sampling_f, **sampling_args):

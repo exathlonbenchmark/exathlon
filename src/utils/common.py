@@ -212,6 +212,10 @@ def get_modeling_task_args(args):
     Returns:
         list: relevant list of modeling task argument values corresponding to `args`.
     """
+    modeling_data_args = [a for a, v in zip([args.modeling_n_periods, args.modeling_data_prop], [-1, 1]) if a != v]
+    # if taking all data from a single period, then it is the largest one and therefore not random
+    if len(modeling_data_args) > 0 and not (args.modeling_n_periods == args.modeling_data_prop == 1):
+        modeling_data_args += [args.modeling_data_seed]
     splitting_args = [args.modeling_split.replace('.split', ''), args.modeling_split_seed]
     if args.modeling_split == 'stratified.split':
         splitting_args += [args.n_period_strata]
@@ -223,7 +227,7 @@ def get_modeling_task_args(args):
     elif args.model_type in CHOICES['train_model']['reconstruction']:
         task_name = 'reco'
         task_args += [args.window_size, args.window_step]
-    return splitting_args + [task_name] + task_args
+    return modeling_data_args + splitting_args + [task_name] + task_args
 
 
 def get_model_args(args):
@@ -842,13 +846,25 @@ parsers['train_model'] = argparse.ArgumentParser(
 )
 # train/val/test datasets constitution for the modeling task
 parsers['train_model'].add_argument(
+    '--modeling-n-periods', default=DEFAULTS['modeling_n_periods'], type=int,
+    help='number of periods to set as input normal data (first largest, then selected at random)'
+)
+parsers['train_model'].add_argument(
+    '--modeling-data-prop', default=DEFAULTS['modeling_data_prop'], type=is_percentage,
+    help='proportion of input normal data to consider when constituting the modeling datasets'
+)
+parsers['train_model'].add_argument(
+    '--modeling-data-seed', default=DEFAULTS['modeling_data_seed'], type=int,
+    help='random seed to use when selecting the subset of normal data used for modeling'
+)
+parsers['train_model'].add_argument(
     '--modeling-split', default=DEFAULTS['modeling_split'],
     choices=CHOICES['train_model']['modeling_split'],
     help='splitting strategy for constituting the modeling `train/val/test` sets'
 )
 parsers['train_model'].add_argument(
     '--modeling-split-seed', default=DEFAULTS['modeling_split_seed'], type=int,
-    help='random seed used when constituting the modeling `train/val/test` sets'
+    help='random seed to use when constituting the modeling `train/val/test` sets'
 )
 parsers['train_model'].add_argument(
     '--modeling-val-prop', default=DEFAULTS['modeling_val_prop'], type=is_percentage,
