@@ -16,7 +16,8 @@ the type of pipeline to run:
 * ED PATH
 - train_explainer.py.
 
-We do not rerun a pipeline step if it has been run already (existing output directory).
+Except for the scoring and detection steps of the AD pipeline, we do not rerun a pipeline step
+if it has been run already (existing output directory).
 """
 import os
 import warnings
@@ -46,8 +47,8 @@ if __name__ == '__main__':
     if ad and ed and args.explained_predictions == 'ground.truth':
         warnings.warn('As specified, ED will be run after AD, but explaining ground truth labels')
     for folder, script in zip(folders, scripts):
-        # if the output of a main pipeline step already exists, we do not rerun it
-        if script != 'train_detector':
+        # if the output of a main pipeline step already exists, do not rerun it (except scoring and detection)
+        if script not in ['train_scorer', 'train_detector']:
             if os.path.exists(get_output_path(args, script)):
                 print(f'We do not run pipeline step "{script}" as it has been run already.')
                 continue
