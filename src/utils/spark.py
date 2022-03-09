@@ -210,18 +210,18 @@ REPORTING_DEFAULT_ARGS = {
     'detection_set_name': 'test',
     'detection_metrics': ['f_score', 'precision', 'recall'],
     'detection_granularity': 'global',
-    'detection_anomaly_types': ['global'],
+    'detection_anomaly_types': ['global', 'all'],
     'detection_anomaly_avg_type': 'all_but_unknown',
     # compared explanation performance
     'explanation_set_name': 'test',
     'explanation_metrics': [
-        'ed2_conciseness',
+        'time', 'ed2_conciseness',
         'ed1_norm_consistency', 'ed2_norm_consistency',
         'ed1_precision', 'ed1_recall',
-        'ed2_precision', 'ed2_recall'
+        'ed2_precision', 'ed2_recall',
     ],
     'explanation_granularity': 'global',
-    'explanation_anomaly_types': ['all'],
+    'explanation_anomaly_types': ['all', 'avg'],
     'explanation_anomaly_avg_type': 'all_but_unknown'
 }
 
@@ -267,7 +267,7 @@ def add_specific_args(parsers, pipeline_step, pipeline_steps):
         # considered traces might be restricted to a given application id (0 for no restriction)
         arg_names.append('--app-id')
         arg_params.append({
-            'default': 1,
+            'default': 0,
             'choices': [0] + list(set(APP_IDS) - {7, 8}),
             'type': int,
             'help': 'application id (0 for all, we exclude 7 and 8 since they '

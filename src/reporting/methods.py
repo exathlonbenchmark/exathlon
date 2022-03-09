@@ -25,7 +25,7 @@ ARGS = {
     'data': USED_DATA,
 
     # spark-specific arguments
-    'app_id': 1,
+    'app_id': 0,
     'trace_types': '.',
     'ignored_anomalies': 'none',
 
@@ -54,6 +54,9 @@ ARGS = {
     'fa_training': 'all.training',
 
     # normality modeling arguments
+    'modeling_n_periods': -1,
+    'modeling_data_prop': 1.0,
+    'modeling_data_seed': 21,
     'modeling_split': 'stratified.split',
     'modeling_split_seed': 21,
     'n_period_strata': 3,
@@ -170,6 +173,7 @@ ARGS = {
     # pipeline execution shortcut arguments
     'pipeline_type': 'ad.ed'
 }
+# uncomment to report the AD results of the paper (after having run the corresponding methods)
 COMPARED_ARGS, COMPARED_METHOD_TITLES = [], []
 for m, s in zip(['rnn', 'ae', 'bigan'], ['re', 'mse', 'mse.ft']):
     args_dict = copy.deepcopy(ARGS)
@@ -177,3 +181,10 @@ for m, s in zip(['rnn', 'ae', 'bigan'], ['re', 'mse', 'mse.ft']):
     args_dict['scoring_method'] = s
     COMPARED_ARGS.append(args_dict)
     COMPARED_METHOD_TITLES.append(m.upper())
+# uncomment to report the ED results of the paper (after having run the corresponding methods)
+#COMPARED_ARGS, COMPARED_METHOD_TITLES = [], []
+#for m in ['macrobase', 'exstream', 'lime']:
+#    args_dict = copy.deepcopy(ARGS)
+#    args_dict['explanation_method'] = m
+#    COMPARED_ARGS.append(args_dict)
+#    COMPARED_METHOD_TITLES.append(m.upper())
