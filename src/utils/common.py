@@ -19,13 +19,14 @@ PIPELINE_STEPS = [
     'build_features',
     'train_model',
     'train_scorer',
-    'train_detector',
-    'train_explainer'
+    'train_detector'
 ]
+# explanation discovery step name (not included in `PIPELINE_STEPS` as its index may vary)
+EXPLANATION_STEP = 'train_explainer'
 # reporting step name
 REPORTING_STEP = 'report_results'
 # callable file names relating to the explainable anomaly detection pipeline
-PIPELINE_CALLABLES = PIPELINE_STEPS + ['run_pipeline']
+PIPELINE_CALLABLES = PIPELINE_STEPS + [EXPLANATION_STEP, 'run_pipeline']
 # main pipeline and normality modeling dataset names
 PIPELINE_TRAIN_NAME, PIPELINE_TEST_NAME = 'train', 'test'
 MODELING_TRAIN_NAME, MODELING_VAL_NAME, MODELING_TEST_NAME = 'train', 'val', 'test'
@@ -76,21 +77,15 @@ def get_output_path(args, execution_step, output_details=None):
     if execution_step == REPORTING_STEP:
         return os.path.join(REPORTS_ROOT, get_args_string(args, 'reporting_methods'))
     path_extensions = dict()
-    step_index = PIPELINE_STEPS.index(execution_step)
-    path_extensions['make_datasets'] = get_args_string(args, 'data')
-    if step_index >= 1:
-        path_extensions['build_features'] = get_args_string(args, 'features')
-    if step_index >= 2:
-        # separate arguments of the modeling task from the ones of the model performing that task
-        path_extensions['train_model'] = os.path.join(
-            get_args_string(args, 'modeling_task'), get_args_string(args, 'model')
+    pipeline_steps = PIPELINE_STEPS.copy()
+    if execution_step == EXPLANATION_STEP:
+        # the index of the explanation step depends on the type of method and explained elements
+        pipeline_steps.insert(get_explanation_step_index(args), 'train_explainer')
+    step_index = pipeline_steps.index(execution_step)
+    for i in range(step_index + 1):
+        path_extensions[pipeline_steps[i]] = os.path.join(
+            *[get_args_string(args, c) for c in CONFIG_KEYS[pipeline_steps[i]]]
         )
-    if step_index >= 3:
-        path_extensions['train_scorer'] = get_args_string(args, 'scoring')
-    if step_index >= 4:
-        path_extensions['train_detector'] = get_args_string(args, 'thresholding')
-    if step_index >= 5:
-        path_extensions['train_explainer'] = get_args_string(args, 'explanation')
     if execution_step == 'make_datasets':
         return os.path.join(
             INTERIM_ROOT,
@@ -103,20 +98,7 @@ def get_output_path(args, execution_step, output_details=None):
             path_extensions['make_datasets'],
             path_extensions['build_features']
         )
-    # explanation discovery run on ground-truth labels
-    if execution_step == 'train_explainer' and args.explained_predictions == 'ground.truth':
-        # no AD model involved at all: the chain is then just data => features => explanation
-        if args.explanation_method in CHOICES['train_explainer']['model_free_explanation']:
-            chain_ids = [PIPELINE_STEPS.index('make_datasets'), PIPELINE_STEPS.index('build_features'), step_index]
-        # a scorer is explained: the chain is then data => features => scoring => explanation
-        else:
-            chain_ids = list(range(PIPELINE_STEPS.index('train_scorer') + 1)) + [step_index]
-        # add an "ed" prefix to visually separate from anomaly detection paths
-        extensions_chain = [path_extensions[PIPELINE_STEPS[i]] for i in chain_ids]
-        extensions_chain[-1] = hyper_to_path('ed', extensions_chain[-1])
-    # either no explanation discovery involved, or involved at the very end on final AD predictions
-    else:
-        extensions_chain = [path_extensions[PIPELINE_STEPS[i]] for i in range(step_index + 1)]
+    extensions_chain = [path_extensions[pipeline_steps[i]] for i in range(step_index + 1)]
     # return either the current step model's path (default) or the step comparison path
     comparison_path = os.path.join(
         MODELS_ROOT,
@@ -126,6 +108,31 @@ def get_output_path(args, execution_step, output_details=None):
         return os.path.join(comparison_path, extensions_chain[-1])
     assert output_details == 'comparison', f'specify `comparison` for the comparison path of `{execution_step}`'
     return comparison_path
+
+
+def get_explanation_step_index(args):
+    """Returns the index of the explanation step in the ordered list of main pipeline steps.
+
+    The explanation step can be run after:
+    - feature extraction, for model-free methods explaining ground-truth labels.
+    - outlier score derivation, for model-dependent methods explaining outlier scores around ground-truth labels.
+    - final detection, for methods explaining the binary predictions of an AD model.
+
+    Args:
+        args (argparse.Namespace): parsed command-line arguments.
+
+    Returns:
+        int: the explanation step index.
+    """
+    # remove irrelevant arguments for explanation discovery explaining ground-truth labels
+    mf_choices, md_choices = CHOICES['train_explainer']['model_free_explanation'], \
+        CHOICES['train_explainer']['model_dependent_explanation']
+    assert args.explanation_method in mf_choices + md_choices
+    if args.explained_predictions == 'ground.truth':
+        last_relevant_script = 'build_features' if args.explanation_method in mf_choices else 'train_scorer'
+    else:
+        last_relevant_script = 'train_detector'
+    return PIPELINE_STEPS.index(last_relevant_script) + 1
 
 
 def get_data_args(args):
@@ -525,6 +532,17 @@ ARGS_GETTER_DICT = {
     'explanation': get_explanation_args,
     'reporting_methods': get_reporting_methods_args,
     'reporting_performance': get_reporting_performance_args
+}
+
+# configuration keys corresponding to the main pipeline steps
+CONFIG_KEYS = {
+    'make_datasets': ['data'],
+    'build_features': ['features'],
+    # separate arguments of the modeling task from the ones of the model performing that task
+    'train_model': ['modeling_task', 'model'],
+    'train_scorer': ['scoring'],
+    'train_detector': ['thresholding'],
+    'train_explainer': ['explanation']
 }
 
 
@@ -1308,11 +1326,7 @@ def get_script_args_dict(args_dict, script_name, remove_irrelevant=False):
     if not remove_irrelevant or script_name != 'train_explainer' or args_dict['explained_predictions'] == 'model':
         # return all argument values for the provided step
         return script_dict
-    # remove irrelevant arguments for explanation discovery explaining ground-truth labels
-    mf_choices, md_choices = CHOICES['train_explainer']['model_free'], CHOICES['train_explainer']['model_dependent']
-    assert script_dict['explanation_method'] in mf_choices + md_choices
-    # model-dependent methods do not need detection args; model-free modeling, scoring and detection args
-    last_relevant_script = 'build_features' if script_dict['explanation_method'] in mf_choices else 'train_scorer'
+    last_relevant_script = PIPELINE_STEPS[get_explanation_step_index(argparse.Namespace(**script_dict))-1]
     return get_dicts_difference(
         script_dict,
         get_dicts_difference(

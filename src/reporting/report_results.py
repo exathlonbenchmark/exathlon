@@ -15,7 +15,7 @@ import pandas as pd
 import sys
 src_path = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
 sys.path.append(src_path)
-from utils.common import parsers, ANOMALY_TYPES, get_output_path, get_args_string, get_script_args_dict
+from utils.common import parsers, ANOMALY_TYPES, CONFIG_KEYS, get_output_path, get_args_string, get_script_args_dict
 from reporting.helpers import check_reporting_args, get_args_combinations, get_column_names, add_avg_columns
 from reporting.methods import COMPARED_ARGS, COMPARED_METHOD_TITLES
 
@@ -29,19 +29,19 @@ CORRESPONDENCE_DICT = {
         # key to obtain the evaluation parameters (comparison spreadsheet name)
         'evaluation_key': 'modeling_task',
         # key to obtain the method's configuration (index in the comparison spreadsheet)
-        'config_key': 'model'
+        'config_key': CONFIG_KEYS['train_model'][1]
     },
     'scoring': {
         'pipeline_step': 'train_scorer', 'evaluation_key': 'ad_evaluation',
-        'config_key': 'scoring'
+        'config_key': CONFIG_KEYS['train_scorer'][0]
     },
     'detection': {
         'pipeline_step': 'train_detector', 'evaluation_key': 'ad_evaluation',
-        'config_key': 'thresholding'
+        'config_key': CONFIG_KEYS['train_detector'][0]
     },
     'explanation': {
         'pipeline_step': 'train_explainer', 'evaluation_key': 'ed_evaluation',
-        'config_key': 'explanation'
+        'config_key': CONFIG_KEYS['train_explainer'][0]
     }
 }
 
