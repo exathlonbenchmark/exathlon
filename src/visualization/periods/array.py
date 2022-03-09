@@ -135,8 +135,8 @@ def plot_period_anomalies(ax, period_labels):
                 ax.axvline(range_idx, label='Real Anomaly Range', color='r')
 
 
-def plot_scores_distributions(periods_scores, periods_labels, restricted_types=None, fig_title=None,
-                              type_colors=None, anomaly_types=None, full_output_path=None):
+def plot_scores_distributions(periods_scores, periods_labels, threshold=None, restricted_types=None,
+                              fig_title=None, type_colors=None, anomaly_types=None, full_output_path=None):
     """Plots the distributions of the provided `scores` by record types.
 
     Args:
@@ -144,9 +144,10 @@ def plot_scores_distributions(periods_scores, periods_labels, restricted_types=N
             Where `period_length` depends on the period.
         periods_labels (ndarray): either binary or multiclass periods labels.
             With the same shape as `periods_scores`.
-        restricted_types (list): optional restriction of record types to plot.
+        threshold (float|None): optional outlier score threshold value to highlight in the figure.
+        restricted_types (list|None): optional restriction of record types to plot.
             If not None, have to be either `normal` or `anomalous`, or either `normal` or in `anomaly_types`.
-        fig_title (str): optional figure title.
+        fig_title (str|None): optional figure title.
         type_colors (dict|None): if multiple anomaly types, colors to use for each type.
             Every type in `anomaly_types` must then be present as a key in `type_colors`. The color for
             "normal" (label 0) is fixed to blue.
@@ -236,6 +237,15 @@ def plot_scores_distributions(periods_scores, periods_labels, restricted_types=N
             uncapped_scores, bins=bins, label=hist_labels[-1], color=colors[k],
             weights=np.ones_like(uncapped_scores) / len(uncapped_scores),
             alpha=alphas[k], edgecolor='black', linewidth=1.2
+        )
+    # highlight the outlier score threshold value if provided
+    if threshold is not None:
+        threshold_pos = (threshold, 0.60 * hist_ax.get_ylim()[1])
+        threshold_text_pos = (1.05 * threshold_pos[0], 1.05 * threshold_pos[1])
+        hist_ax.axvline(threshold, color='r', lw=3, linestyle='--')
+        hist_ax.annotate(
+            'Threshold', threshold_pos,
+            color='r', fontsize=fontsizes_dict['legend'], xytext=threshold_text_pos
         )
     plt.grid()
     # re-order the legend labels if relevant
