@@ -843,7 +843,7 @@ class ModelDependentEvaluator(EDEvaluator):
 
         # the whole instance is the target anomaly (and larger than the sample length)
         if instance_length > self.min_instance_length:
-            if self.large_anomalies_coverage == ['center', 'end']:
+            if self.large_anomalies_coverage in ['center', 'end']:
                 if self.large_anomalies_coverage == 'center':
                     # lean more towards the instance start if different parities
                     sample_start = floor((instance_length - sample_length) / 2)
